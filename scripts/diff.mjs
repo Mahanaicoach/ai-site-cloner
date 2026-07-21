@@ -1,28 +1,86 @@
 #!/usr/bin/env node
-// Scored visual diff: original vs clone. Two modes:
+// Scored visual diff: original vs clone. Three modes:
 //
-// File mode:  node scripts/diff.mjs --a original.png --b clone.png [--out diff.png]
-// Live mode:  node scripts/diff.mjs --original <url> --clone <url> [--selector css]
-//               [--clone-selector css] [--viewport pc|ipad|phone|all|pc,phone] [--name hero]
+// File mode:    node scripts/diff.mjs --a original.png --b clone.png [--out diff.png]
+// Live mode:    node scripts/diff.mjs --original <url> --clone <url> [--selector css]
+//                 [--clone-selector css] [--viewport pc|ipad|phone|all|pc,phone] [--name hero]
+// Batched mode: node scripts/diff.mjs --original <url> --clone <url> --viewport all
+//                 --section hero=section.hero --section features=#features
+//                 (or --route / to pull every section of that route from the manifest)
+//
+// Batched mode loads each side ONCE per viewport and screenshots every section
+// from that load — an 8-section sweep costs 6 page loads instead of 48. Use it
+// for the initial QA sweep; fix iterations should stay single-section.
+//
+// The original side of a live/batched run is cached: a PNG + .meta.json sidecar
+// under docs/research/qa/ is reused when the url/selector/viewport match and the
+// shot is <24h old, so fix iterations only re-render the clone. --fresh-original
+// forces a re-shoot (use it if the live site itself changed mid-run).
 //
 // --selector applies to both sides; --clone-selector overrides it for the clone
-// when your component's markup uses different hooks than the target's.
+// when your component's markup uses different hooks than the target's. Batched
+// mode applies each section's selector to both sides (fall back to single mode
+// for per-side selector overrides).
 // --viewport takes one name, a comma list, or "all" (= pc,ipad,phone). Default: pc.
 //
-// Prints ONE JSON object to stdout: { name, viewports: { pc: {...}, ipad: {...} } }.
-// Single-viewport and file-mode runs use the same shape with one key (file mode
-// reports under "file") — a consistent shape is easier for the calling agent
-// than a flat object that changes layout depending on how it was invoked.
+// Prints ONE JSON object to stdout:
+//   live/file:  { name, viewports: { pc: {...}, ipad: {...} } }
+//   batched:    { route, sections: { hero: { viewports: {...} }, ... } }
 // Each viewport carries a 10-band breakdown so the caller learns WHERE the
 // mismatch lives, not just how much of it there is.
-// Exit code 1 if --threshold given and ANY requested viewport is below it.
+// Exit code 1 if --threshold given and ANY requested viewport (any section) is below it.
 // Live-mode artifacts land in docs/research/qa/.
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { PNG } from "pngjs";
 import pixelmatch from "pixelmatch";
-import { VIEWPORTS, openPage, closeBrowser, gotoAndSettle, autoScroll, freezePage, slugify, parseArgs } from "./lib.mjs";
+import {
+  VIEWPORTS,
+  openPage,
+  closeBrowser,
+  gotoAndSettle,
+  autoScroll,
+  freezePage,
+  slugify,
+  parseArgs,
+  toList,
+} from "./lib.mjs";
 
 const args = parseArgs(process.argv.slice(2));
+
+const DIR = "docs/research/qa";
+const ORIGINAL_FRESH_MS = 24 * 3600 * 1000;
+
+// ---------------------------------------------------------------------------
+// Original-side shot cache. The original site never changes between QA fix
+// iterations, so re-rendering it every time was pure waste. The sidecar (not
+// the filename) is the invalidation key — it catches a reused --name pointing
+// at a different url/selector/viewport.
+// ---------------------------------------------------------------------------
+const metaPathFor = (pngPath) => pngPath.replace(/\.png$/, ".meta.json");
+
+function originalCached(pngPath, url, viewport, selector) {
+  if (args["fresh-original"]) return false;
+  try {
+    const m = JSON.parse(readFileSync(metaPathFor(pngPath), "utf8"));
+    return (
+      existsSync(pngPath) &&
+      m.url === url &&
+      (m.selector || null) === (selector || null) &&
+      m.viewport?.width === viewport.width &&
+      m.viewport?.height === viewport.height &&
+      Date.now() - m.capturedAt < ORIGINAL_FRESH_MS
+    );
+  } catch {
+    return false;
+  }
+}
+
+function writeOriginalMeta(pngPath, url, viewport, selector) {
+  writeFileSync(
+    metaPathFor(pngPath),
+    JSON.stringify({ url, selector: selector || null, viewport, capturedAt: Date.now() }, null, 2) + "\n"
+  );
+}
 
 async function shoot(url, path, viewport, selector) {
   const { page, close } = await openPage(viewport);
@@ -42,6 +100,33 @@ async function shoot(url, path, viewport, selector) {
     await close();
   }
   return path;
+}
+
+// Batched capture: one load, one forced scroll, one freeze — then every section
+// screenshotted from the same live page. Sections are shot in the given order;
+// a section that fails to resolve is reported and skipped, not fatal.
+async function shootSectionsOnce(url, viewport, sections, pathFor) {
+  const { page, close } = await openPage(viewport);
+  const captured = {};
+  try {
+    await gotoAndSettle(page, url);
+    await autoScroll(page, { force: true });
+    await freezePage(page);
+    for (const { name, selector } of sections) {
+      try {
+        const loc = page.locator(selector).first();
+        await loc.scrollIntoViewIfNeeded({ timeout: 3000 });
+        await loc.screenshot({ path: pathFor(name), timeout: 5000 });
+        captured[name] = true;
+      } catch (e) {
+        console.error(`  ! ${name} (${selector}): ${String(e).split("\n")[0]}`);
+        captured[name] = false;
+      }
+    }
+  } finally {
+    await close();
+  }
+  return captured;
 }
 
 const BAND_COUNT = 10;
@@ -100,10 +185,39 @@ function compare(pathA, pathB, outPath) {
   };
 }
 
-const results = {}; // viewport name -> compare() result
-let name;
+// --section name=css (repeatable) plus --route </r> (reads the manifest).
+function parseSections() {
+  const out = [];
+  for (const item of toList(args.section).map(String)) {
+    const eq = item.indexOf("=");
+    if (eq < 1) {
+      console.error(`Bad --section "${item}" — use --section name=css-selector`);
+      process.exit(1);
+    }
+    out.push({ name: slugify(item.slice(0, eq).trim()), selector: item.slice(eq + 1).trim() });
+  }
+  if (args.route && args.route !== true) {
+    let manifest;
+    try {
+      manifest = JSON.parse(readFileSync("docs/research/manifest.json", "utf8"));
+    } catch {
+      console.error("No readable docs/research/manifest.json — --route needs an initialized manifest");
+      process.exit(1);
+    }
+    const p = manifest.pages.find((p) => p.route === args.route);
+    if (!p) {
+      console.error(`Route ${args.route} not in manifest. Routes: ${manifest.pages.map((p) => p.route).join(", ")}`);
+      process.exit(1);
+    }
+    for (const s of p.sections) {
+      const name = slugify(s.name);
+      if (!out.some((o) => o.name === name)) out.push({ name, selector: s.selector });
+    }
+  }
+  return out;
+}
 
-if (args.original && args.clone) {
+function parseViewports() {
   const vpArg = !args.viewport || args.viewport === true ? "pc" : String(args.viewport);
   const vpNames = vpArg === "all" ? ["pc", "ipad", "phone"] : vpArg.split(",").map((s) => s.trim()).filter(Boolean);
   const unknown = vpNames.filter((v) => !VIEWPORTS[v]);
@@ -111,50 +225,124 @@ if (args.original && args.clone) {
     console.error(`Unknown viewport(s): ${unknown.join(", ") || vpArg} — use ${Object.keys(VIEWPORTS).join(", ")}, a comma list, or "all"`);
     process.exit(1);
   }
-  name = args.name || slugify(args.selector || "page");
-  const dir = "docs/research/qa";
-  mkdirSync(dir, { recursive: true });
-  // Every (side × viewport) shot is an independent page in its own context, so
-  // ALL of them run concurrently on the one shared browser — a 3-viewport run
-  // costs barely more wall time than a 1-viewport run.
-  await Promise.all(
-    vpNames.flatMap((vp) => [
-      shoot(args.original, `${dir}/${name}-${vp}-original.png`, VIEWPORTS[vp], args.selector),
-      shoot(args.clone, `${dir}/${name}-${vp}-clone.png`, VIEWPORTS[vp], args["clone-selector"] || args.selector),
-    ])
-  );
-  await closeBrowser();
-  for (const vp of vpNames) {
-    // --out keeps its old single-run meaning; multi-viewport runs would clobber
-    // one file with every diff, so they always use the per-viewport path.
-    const outPath = vpNames.length === 1 && args.out ? args.out : `${dir}/${name}-${vp}-diff.png`;
-    results[vp] = compare(`${dir}/${name}-${vp}-original.png`, `${dir}/${name}-${vp}-clone.png`, outPath);
+  return vpNames;
+}
+
+let output; // final stdout JSON
+const flat = []; // [scope, viewportName, result] for the stderr summary + threshold
+
+if (args.original && args.clone) {
+  const vpNames = parseViewports();
+  mkdirSync(DIR, { recursive: true });
+  const sections = parseSections();
+
+  if (sections.length) {
+    // Batched mode: per (side × viewport) ONE load covers every section. All six
+    // loads run concurrently on the shared browser.
+    await Promise.all(
+      vpNames.flatMap((vp) => {
+        const origPathFor = (n) => `${DIR}/${n}-${vp}-original.png`;
+        const jobs = [
+          shootSectionsOnce(args.clone, VIEWPORTS[vp], sections, (n) => `${DIR}/${n}-${vp}-clone.png`),
+        ];
+        const missing = sections.filter((s) => !originalCached(origPathFor(s.name), args.original, VIEWPORTS[vp], s.selector));
+        if (missing.length) {
+          // Re-shoot ALL sections from the one load (marginal cost ~0) so every
+          // sidecar carries the same capture time.
+          jobs.push(
+            shootSectionsOnce(args.original, VIEWPORTS[vp], sections, origPathFor).then((captured) => {
+              for (const s of sections) {
+                if (captured[s.name]) writeOriginalMeta(origPathFor(s.name), args.original, VIEWPORTS[vp], s.selector);
+              }
+            })
+          );
+        } else {
+          console.error(`  reusing ${sections.length} cached original shots [${vp}]`);
+        }
+        return jobs;
+      })
+    );
+    await closeBrowser();
+    const sectionResults = {};
+    for (const s of sections) {
+      sectionResults[s.name] = { viewports: {} };
+      for (const vp of vpNames) {
+        const a = `${DIR}/${s.name}-${vp}-original.png`;
+        const b = `${DIR}/${s.name}-${vp}-clone.png`;
+        if (!existsSync(a) || !existsSync(b)) {
+          sectionResults[s.name].viewports[vp] = { error: `missing ${!existsSync(a) ? "original" : "clone"} shot` };
+          flat.push([s.name, vp, null]);
+          continue;
+        }
+        const r = compare(a, b, `${DIR}/${s.name}-${vp}-diff.png`);
+        sectionResults[s.name].viewports[vp] = r;
+        flat.push([s.name, vp, r]);
+      }
+    }
+    output = { route: args.route && args.route !== true ? args.route : null, sections: sectionResults };
+  } else {
+    // Single live mode.
+    const name = args.name || slugify(args.selector || "page");
+    await Promise.all(
+      vpNames.flatMap((vp) => {
+        const origPath = `${DIR}/${name}-${vp}-original.png`;
+        const jobs = [shoot(args.clone, `${DIR}/${name}-${vp}-clone.png`, VIEWPORTS[vp], args["clone-selector"] || args.selector)];
+        if (originalCached(origPath, args.original, VIEWPORTS[vp], args.selector)) {
+          console.error(`  reusing original ${name}-${vp}-original.png`);
+        } else {
+          jobs.push(
+            shoot(args.original, origPath, VIEWPORTS[vp], args.selector).then(() =>
+              writeOriginalMeta(origPath, args.original, VIEWPORTS[vp], args.selector)
+            )
+          );
+        }
+        return jobs;
+      })
+    );
+    await closeBrowser();
+    const results = {};
+    for (const vp of vpNames) {
+      // --out keeps its old single-run meaning; multi-viewport runs would clobber
+      // one file with every diff, so they always use the per-viewport path.
+      const outPath = vpNames.length === 1 && args.out ? args.out : `${DIR}/${name}-${vp}-diff.png`;
+      results[vp] = compare(`${DIR}/${name}-${vp}-original.png`, `${DIR}/${name}-${vp}-clone.png`, outPath);
+      flat.push([name, vp, results[vp]]);
+    }
+    output = { name, viewports: results };
   }
 } else if (args.a && args.b) {
-  name = args.name || "file";
-  results.file = compare(args.a, args.b, args.out || null);
+  const name = args.name || "file";
+  const r = compare(args.a, args.b, args.out || null);
+  flat.push([name, "file", r]);
+  output = { name, viewports: { file: r } };
 } else {
-  console.error("Usage: diff.mjs --a orig.png --b clone.png  OR  --original <url> --clone <url> [--selector css] [--viewport pc|ipad|phone|all|pc,phone]");
+  console.error(
+    "Usage: diff.mjs --a orig.png --b clone.png  OR  --original <url> --clone <url> [--selector css | --section name=css ... | --route /] [--viewport pc|ipad|phone|all|pc,phone]"
+  );
   process.exit(1);
 }
 
-console.log(JSON.stringify({ name, viewports: results }, null, 2));
+console.log(JSON.stringify(output, null, 2));
 
-for (const [vp, r] of Object.entries(results)) {
+for (const [scope, vp, r] of flat) {
+  if (!r) {
+    console.error(`[${scope} ${vp}] NOT CAPTURED`);
+    continue;
+  }
   const worst = r.bands.reduce((w, b) => (b.match < w.match ? b : w));
   const heightNote =
     r.originalHeight !== r.cloneHeight
       ? ` · HEIGHT MISMATCH: original ${r.originalHeight}px vs clone ${r.cloneHeight}px (compared top ${r.height}px)`
       : "";
-  console.error(`[${vp}] Match: ${r.match.toFixed(2)}% · worst band: ${worst.band} (y ${worst.yRange}) at ${worst.match}%${heightNote}`);
+  console.error(`[${scope} ${vp}] Match: ${r.match.toFixed(2)}% · worst band: ${worst.band} (y ${worst.yRange}) at ${worst.match}%${heightNote}`);
 }
 
 if (args.threshold) {
   const t = Number(args.threshold);
   let failed = false;
-  for (const [vp, r] of Object.entries(results)) {
-    if (r.match < t) {
-      console.error(`FAIL [${vp}]: ${r.match}% below threshold ${t}%`);
+  for (const [scope, vp, r] of flat) {
+    if (!r || r.match < t) {
+      console.error(`FAIL [${scope} ${vp}]: ${r ? `${r.match}%` : "not captured"} below threshold ${t}%`);
       failed = true;
     }
   }
