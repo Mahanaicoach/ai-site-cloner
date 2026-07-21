@@ -81,41 +81,74 @@ const DETECT = `(function () {
   const LEAF = new Set(["SECTION", "HEADER", "FOOTER", "NAV", "ASIDE", "ARTICLE", "MAIN"]);
   const MIN_H = 40; // site headers are often ~44px on phones
   const found = [];
+  // Produce a selector that provably resolves back to this exact element.
+  // Class-based selectors are preferred (readable in specs), but Tailwind
+  // classes are rarely unique, so there's a guaranteed positional fallback.
   function selectorFor(el) {
-    let s = el.tagName.toLowerCase();
-    if (el.id) return s + "#" + CSS.escape(el.id);
-    const cls = (el.className?.toString() || "").split(" ").filter(Boolean)[0];
-    if (cls) {
-      const withClass = s + "." + CSS.escape(cls);
-      if (document.querySelectorAll(withClass).length === 1) return withClass;
+    const tag = el.tagName.toLowerCase();
+    const ok = (s) => {
+      try {
+        return document.querySelector(s) === el ? s : null;
+      } catch {
+        return null;
+      }
+    };
+    if (el.id) {
+      const s = ok(tag + "#" + CSS.escape(el.id));
+      if (s) return s;
     }
-    // fall back to a positional selector against the parent
-    const parent = el.parentElement;
-    if (parent) {
-      const idx = [...parent.children].indexOf(el) + 1;
-      const parentSel = parent === document.body ? "body" : selectorFor(parent);
-      return parentSel + " > :nth-child(" + idx + ")";
+    const classes = (el.className?.toString() || "").split(/\s+/).filter(Boolean).map((c) => CSS.escape(c));
+    for (const n of [1, 2, 3]) {
+      if (classes.length < n) break;
+      const s = ok(tag + "." + classes.slice(0, n).join("."));
+      if (s) return s;
     }
-    return s;
+    // Guaranteed fallback: absolute nth-child path from <body>
+    const parts = [];
+    let cur = el;
+    while (cur && cur !== document.body && cur.parentElement) {
+      parts.unshift(":nth-child(" + ([...cur.parentElement.children].indexOf(cur) + 1) + ")");
+      cur = cur.parentElement;
+    }
+    return "body > " + parts.join(" > ");
   }
+  // A real section is roughly viewport-scale. Anything much taller is a
+  // container holding several sections, so keep descending through it.
+  const MAX_SECTION_H = Math.max(1400, window.innerHeight * 1.6);
   function walk(el, depth) {
-    if (depth > 5 || found.length > 25) return;
+    if (depth > 7 || found.length > 25) return;
     for (const child of el.children) {
-      if (["SCRIPT", "STYLE", "NOSCRIPT"].includes(child.tagName)) continue;
+      if (["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE", "svg", "SVG"].includes(child.tagName)) continue;
       const r = child.getBoundingClientRect();
       if (r.height < MIN_H) continue;
       const bigKids = [...child.children].filter((k) => k.getBoundingClientRect().height >= MIN_H);
-      // A repeated collection (3+ children of the same tag) is ONE section —
-      // it becomes one component fed by a data array, never N sections.
+      // A repeated collection (a card grid, a tile row) is ONE section — it
+      // becomes one component fed by a data array, never N sections. Requires
+      // same tag AND similar heights: three <div>s of 852/2161/974px is a page
+      // scaffold, not a grid, and must still be descended into.
+      const kidHeights = bigKids.map((k) => k.getBoundingClientRect().height);
+      const minKid = Math.min(...kidHeights);
+      const maxKid = Math.max(...kidHeights);
       const isCollection =
-        bigKids.length >= 3 && new Set(bigKids.map((k) => k.tagName)).size === 1;
-      if (!isCollection) {
-        // A generic wrapper holding multiple big blocks isn't a section — descend.
-        if (!LEAF.has(child.tagName) && bigKids.length > 1) {
+        bigKids.length >= 3 &&
+        new Set(bigKids.map((k) => k.tagName)).size === 1 &&
+        maxKid - minKid <= maxKid * 0.25 && // siblings are roughly equal
+        r.height <= MAX_SECTION_H;
+      // The rule: a section is the first element small enough to BE a section.
+      // Anything taller is a container to descend through. Without this, sites
+      // with no semantic tags recurse all the way down to individual paragraphs.
+      if (!isCollection && bigKids.length >= 1) {
+        if (r.height > MAX_SECTION_H) {
           walk(child, depth + 1);
           continue;
         }
-        // A semantic element that only wraps other semantic sections — descend too.
+        // A pure wrapper adds nothing of its own — unwrap it even at section
+        // scale (common in React output: div > div > main > …).
+        if (!LEAF.has(child.tagName) && !child.id && bigKids.length === 1 && bigKids[0].getBoundingClientRect().height >= r.height * 0.92) {
+          walk(child, depth + 1);
+          continue;
+        }
+        // A semantic element wrapping only other semantic sections.
         if (LEAF.has(child.tagName) && bigKids.length > 1 && bigKids.every((k) => LEAF.has(k.tagName))) {
           walk(child, depth + 1);
           continue;
@@ -128,13 +161,26 @@ const DETECT = `(function () {
     }
   }
   walk(document.body, 0);
+  // Site chrome is always worth its own spec even when nested inside a wrapper
+  for (const tag of ["header", "footer"]) {
+    const el = document.querySelector(tag);
+    if (!el || el.getBoundingClientRect().height < MIN_H) continue;
+    const sel = selectorFor(el);
+    if (!found.some((f) => f.selector === sel)) found.unshift({ selector: sel, label: sel });
+  }
   return found;
 })`;
 
 const results = {};
 let sections = null;
 
-for (const [vpName, vp] of Object.entries(VIEWPORTS)) {
+// Detect sections at PC first — desktop is the canonical layout. At phone width
+// everything stacks and grows tall, which makes containers and sections
+// indistinguishable by height.
+const ORDER = ["pc", "ipad", "phone"].filter((v) => VIEWPORTS[v]);
+
+for (const vpName of ORDER) {
+  const vp = VIEWPORTS[vpName];
   const { browser, page } = await launchPage(vp);
   await gotoAndSettle(page, url);
   await autoScroll(page);
