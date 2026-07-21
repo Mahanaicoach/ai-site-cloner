@@ -14,14 +14,31 @@ const MAX = Number(args.max ?? 25);
 const origin = new URL(startUrl).origin;
 
 // 1. Try sitemap.xml (no browser needed)
+// Same-site check that tolerates www./non-www mismatches (very common)
+const sameSite = (a, b) => {
+  try {
+    return new URL(a).hostname.replace(/^www\./, "") === new URL(b).hostname.replace(/^www\./, "");
+  } catch {
+    return false;
+  }
+};
+
 const fromSitemap = new Set();
 try {
   const res = await fetch(`${origin}/sitemap.xml`, { signal: AbortSignal.timeout(10000) });
   if (res.ok) {
     const xml = await res.text();
-    for (const m of xml.matchAll(/<loc>\s*([^<]+?)\s*<\/loc>/g)) {
-      const u = m[1].trim();
-      if (u.startsWith(origin) && !u.endsWith(".xml")) fromSitemap.add(u);
+    let locs = [...xml.matchAll(/<loc>\s*([^<]+?)\s*<\/loc>/g)].map((m) => m[1].trim());
+    // sitemap index → fetch child sitemaps (first 5)
+    const children = locs.filter((u) => u.endsWith(".xml")).slice(0, 5);
+    for (const child of children) {
+      try {
+        const r = await fetch(child, { signal: AbortSignal.timeout(10000) });
+        if (r.ok) locs.push(...[...(await r.text()).matchAll(/<loc>\s*([^<]+?)\s*<\/loc>/g)].map((m) => m[1].trim()));
+      } catch { /* skip broken child sitemap */ }
+    }
+    for (const u of locs) {
+      if (sameSite(u, origin) && !u.endsWith(".xml")) fromSitemap.add(u);
     }
   }
 } catch {
@@ -33,10 +50,17 @@ const { browser, page } = await launchPage();
 await gotoAndSettle(page, startUrl);
 const links = await page.evaluate(() => {
   const inNav = (el) => !!el.closest("header, nav, footer");
+  const host = location.hostname.replace(/^www\./, "");
   const seen = new Map();
   for (const a of document.querySelectorAll("a[href]")) {
     const href = a.href.split("#")[0].split("?")[0];
-    if (!href.startsWith(location.origin)) continue;
+    let linkHost;
+    try {
+      linkHost = new URL(href).hostname.replace(/^www\./, "");
+    } catch {
+      continue;
+    }
+    if (linkHost !== host) continue;
     if (/\.(pdf|zip|jpg|jpeg|png|webp|svg|mp4|xml|ico)$/i.test(href)) continue;
     const prev = seen.get(href);
     const entry = {
