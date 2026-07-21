@@ -74,24 +74,61 @@ const SIGNATURE = `(function (selector) {
 })`;
 
 // Auto-detect the page's top-level sections — runs in the page.
+// Walk the page top-down collecting real sections. Semantic elements
+// (section/header/footer/nav/main/aside/article) are leaves; generic wrapper
+// divs (body > #wrapper > #main > section...) get expanded through.
 const DETECT = `(function () {
-  const sels = [];
-  const push = (el, s) => { if (el && !sels.some((x) => x.selector === s)) sels.push({ selector: s, label: s }); };
-  if (document.querySelector("header")) push(document.querySelector("header"), "header");
-  const main = document.querySelector("main") || document.body;
-  const kids = [...main.children].filter((el) => el.getBoundingClientRect().height > 80);
-  kids.slice(0, 15).forEach((el, i) => {
+  const LEAF = new Set(["SECTION", "HEADER", "FOOTER", "NAV", "ASIDE", "ARTICLE", "MAIN"]);
+  const MIN_H = 40; // site headers are often ~44px on phones
+  const found = [];
+  function selectorFor(el) {
     let s = el.tagName.toLowerCase();
-    if (el.id) s += "#" + CSS.escape(el.id);
-    else {
-      const cls = (el.className?.toString() || "").split(" ").filter(Boolean)[0];
-      if (cls) s += "." + CSS.escape(cls);
-      else s = (document.querySelector("main") ? "main" : "body") + " > :nth-child(" + (i + 1) + ")";
+    if (el.id) return s + "#" + CSS.escape(el.id);
+    const cls = (el.className?.toString() || "").split(" ").filter(Boolean)[0];
+    if (cls) {
+      const withClass = s + "." + CSS.escape(cls);
+      if (document.querySelectorAll(withClass).length === 1) return withClass;
     }
-    if (document.querySelectorAll(s).length >= 1) push(el, s);
-  });
-  if (document.querySelector("footer")) push(document.querySelector("footer"), "footer");
-  return sels;
+    // fall back to a positional selector against the parent
+    const parent = el.parentElement;
+    if (parent) {
+      const idx = [...parent.children].indexOf(el) + 1;
+      const parentSel = parent === document.body ? "body" : selectorFor(parent);
+      return parentSel + " > :nth-child(" + idx + ")";
+    }
+    return s;
+  }
+  function walk(el, depth) {
+    if (depth > 5 || found.length > 25) return;
+    for (const child of el.children) {
+      if (["SCRIPT", "STYLE", "NOSCRIPT"].includes(child.tagName)) continue;
+      const r = child.getBoundingClientRect();
+      if (r.height < MIN_H) continue;
+      const bigKids = [...child.children].filter((k) => k.getBoundingClientRect().height >= MIN_H);
+      // A repeated collection (3+ children of the same tag) is ONE section —
+      // it becomes one component fed by a data array, never N sections.
+      const isCollection =
+        bigKids.length >= 3 && new Set(bigKids.map((k) => k.tagName)).size === 1;
+      if (!isCollection) {
+        // A generic wrapper holding multiple big blocks isn't a section — descend.
+        if (!LEAF.has(child.tagName) && bigKids.length > 1) {
+          walk(child, depth + 1);
+          continue;
+        }
+        // A semantic element that only wraps other semantic sections — descend too.
+        if (LEAF.has(child.tagName) && bigKids.length > 1 && bigKids.every((k) => LEAF.has(k.tagName))) {
+          walk(child, depth + 1);
+          continue;
+        }
+      }
+      const sel = selectorFor(child);
+      if (!found.some((f) => f.selector === sel) && document.querySelector(sel) === child) {
+        found.push({ selector: sel, label: sel });
+      }
+    }
+  }
+  walk(document.body, 0);
+  return found;
 })`;
 
 const results = {};
