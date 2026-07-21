@@ -1,0 +1,129 @@
+// Content extracted verbatim from the target site.
+// Components take this as props — swap this file to rebrand (see /restyle).
+
+export const nav = {
+  brand: { first: "upload", second: "thing", badge: "BETA" },
+  signIn: { label: "Sign In", href: "/sign-in" },
+};
+
+export const hero = {
+  titleLine1: "Better file uploads",
+  titleLine2: "for developers",
+  body: "Developers deserve better than S3. That's why we made UploadThing, the easier (and safer) alternative. From the button to the server, we've got you covered.",
+  primary: { label: "Get Started for Free", href: "/sign-in" },
+  secondary: { label: "Documentation →", href: "https://docs.uploadthing.com" },
+  // The target renders this artwork on a <canvas>; captured by scripts/extract/canvas.mjs
+  art: { video: "/videos/canvas-0.webm", poster: "/images/canvas-0-poster.png" },
+};
+
+export const features = {
+  kicker: "Your Auth. Our Bandwidth.",
+  title: "The right balance of security and simplicity.",
+  subtitle: "Authentication happens on your server, the upload happens on ours.",
+  serverCode: `export const fileRouter = {
+  imageUploader: f({ image: { maxFileSize: "4MB" } })
+    .middleware(async ({ req }) => {
+      // This code runs on your server before upload
+      const user = await auth(req);
+
+      // Throw to block uploading
+      if (!user)
+        throw new UploadThingError("Unauthorized");
+
+      // Return metadata to client
+      return { userId: user.id };
+    })
+    .onUploadComplete(async ({ metadata, file }) => {
+      // ...
+    }),
+} satisfies FileRouter;`,
+  clientCode: `<UploadButton
+  endpoint="imageUploader" // Typesafe btw
+  onClientUploadComplete={(response) => ...}
+  onUploadError={(error) => ...}
+/>`,
+};
+
+export const testimonial = {
+  quote: "I asked for a better S3 for years. UploadThing exists because we got tired of waiting.",
+  name: "Theo (t3dotgg)",
+  role: "YouTuber, Creator of T3 Stack, CEO @ UploadThing",
+  avatar: "/images/theo.jpg",
+};
+
+export const dashboard = {
+  title: "Easily manage your files.",
+  subtitle: "A powerful, intuitive dashboard for developers to securely manage and track all uploaded files.",
+  image: "/images/dashboard.png",
+};
+
+export type Plan = {
+  name: string;
+  blurb: string;
+  price: string;
+  period: string;
+  cta: string;
+  features: string[];
+  footnote?: string;
+};
+
+export const pricing = {
+  titleLine1: "Worry about your app,",
+  titleLine2: "not your bill.",
+  subtitle: "We wanted pricing to be as simple as possible. No calculator needed. Need something else?",
+  subtitleLink: { label: "Let's chat!", href: "mailto:support@uploadthing.com" },
+  note: "All Prices in USD",
+  plans: [
+    {
+      name: "2GB App",
+      blurb: "Everything you need to start uploading!",
+      price: "$0",
+      period: "/month",
+      cta: "Get Started",
+      features: [
+        "2GB of storage *",
+        "7 days of audit log retention",
+        "Unlimited uploads and downloads",
+        "(Probably) cheaper than a cup of coffee",
+      ],
+      footnote: "* Storage shared between all apps",
+    },
+    {
+      name: "100GB App",
+      blurb: "For those with teams or more than 2 gigs of files. $10/mo",
+      price: "$10",
+      period: "/month",
+      cta: "Get Started",
+      features: ["100GB of storage", "30 days of audit log retention", "Regions", "Private Files"],
+    },
+    {
+      name: "Usage Based",
+      blurb: "Usage based pricing, starting at $25/mo for 250GB of included storage",
+      price: "$25",
+      period: "/month",
+      cta: "Get Started",
+      features: [
+        "250GB of included storage",
+        "30 days of audit log retention",
+        "$0.08 per GB over 250GB",
+        "Regions",
+        "Private Files",
+      ],
+    },
+  ] satisfies Plan[],
+};
+
+export const footer = {
+  copyright: "© 2026 Ping Labs. All rights reserved.",
+  links: [
+    { label: "Terms of Service", href: "/info/terms-of-service" },
+    { label: "Privacy Policy", href: "/info/privacy-policy" },
+    { label: "Support", href: "mailto:support@uploadthing.com" },
+  ],
+  status: "All Systems Operational",
+  social: [
+    { icon: "github" as const, label: "GitHub", href: "https://github.com/pingdotgg/uploadthing" },
+    { icon: "discord" as const, label: "Discord", href: "https://discord.gg/pingdotgg" },
+    { icon: "x" as const, label: "X", href: "https://x.com/uploadthing" },
+  ],
+};

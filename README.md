@@ -1,5 +1,7 @@
 # site-cloner
 
+![site-cloner](docs/cover.png)
+
 Clone any multi-page website into a clean Next.js codebase with Claude Code — then rebrand it as your own.
 
 Point it at a URL. `/clone-website` crawls the site, measures everything with scripted Playwright extraction (no eyeballing), writes auditable component specs, dispatches parallel builder agents in git worktrees, and loops a scored pixel-diff QA at phone/iPad/PC widths until every section passes. Then `/restyle` swaps in your brand — colors, fonts, logo, copy — without touching the cloned layout.
@@ -39,7 +41,11 @@ Point it at a URL. `/clone-website` crawls the site, measures everything with sc
 
 ## Example
 
-[`examples/forty/`](examples/forty/) is a real end-to-end run against the HTML5 UP "Forty" demo — side-by-side screenshots, the four spec files that drove the build, the per-viewport score table (95–99% at desktop), and the eight tooling bugs that run exposed and fixed.
+[`examples/uploadthing/`](examples/uploadthing/) is a real end-to-end run against **uploadthing.com** — side-by-side screenshots, the per-viewport score table (96–99.8% per section), and the tooling bugs that run exposed and fixed.
+
+![original vs clone](examples/uploadthing/comparison.png)
+
+Its hero illustration is painted on a `<canvas>` — normally unclonable, since there's no DOM to copy. The pipeline records it through `canvas.captureStream()` and embeds a looping video, so the clone keeps the artwork *and* its motion.
 
 ## Pipeline
 
@@ -64,6 +70,8 @@ node scripts/extract/section.mjs <url> --selector "x"  # computed styles (+ --st
 node scripts/extract/screenshot.mjs <url>              # phone/iPad/PC screenshots
 node scripts/extract/responsive.mjs <url>              # real layout changes across viewports
 node scripts/extract/probe.mjs <url> --selector "x"    # per-viewport value table for specs
+node scripts/extract/css.mjs <url>                     # real :hover/:focus rules + breakpoints from the stylesheets
+node scripts/extract/canvas.mjs <url>                  # capture <canvas> artwork as video/PNG
 node scripts/diff.mjs --original <url> --clone <url>   # scored pixel diff
 node scripts/lint-spec.mjs docs/research/components    # spec completeness gate
 node scripts/manifest.mjs status                       # pipeline state / resume point
