@@ -37,10 +37,10 @@ The scripts do the mechanical work — **use them instead of hand-measuring via 
 | **`node scripts/extract/page.mjs <url> [--no-site-files]`** | **THE WORKHORSE — one call, 3 page loads total.** Auto-detects sections, then produces `tokens.json` + `css.json` (skip on later pages with `--no-site-files`), `assets.json` + downloads to `public/`, `responsive.json` (all 3 viewports), a full computed-style walk per section (`sections/<name>.json`), and full-page **and** per-section screenshots at phone/iPad/PC. Accepts explicit `--selector "css" --name x` pairs to override detection. Everything is measured from the SAME page state, so numbers, walks and screenshots can never disagree |
 | `node scripts/extract/crawl.mjs <url> [--max 25]` | Discover pages (sitemap + nav links) → `docs/research/<host>/sitemap.json` |
 | `node scripts/extract/section.mjs <url> --selector "css" [--name x] --state scroll:600\|click:sel\|hover:sel [--viewport pc\|ipad\|phone]` | **State captures** (page.mjs covers the default state). Captures a second state and diffs them (element styles *and* `::before`/`::after`), waiting for the section's real transition duration. `--selector`/`--name` repeat — one page load for all |
-| `node scripts/extract/probe.mjs <url> --selector "css" [--selector "css2"] [--props a,b,c]` | Exact computed values for specific selectors at all 3 viewports, as a markdown table with a **varies** column — paste straight into a spec's Responsive section |
+| `node scripts/extract/probe.mjs <url> --selector "css" [--selector "css2"] [--props a,b,c]` / `probe.mjs --route </r>` | Exact computed values for specific selectors at all 3 viewports, as a markdown table with a **varies** column — paste straight into a spec's Responsive section. **`--route` probes EVERY registered section of a page in one call (3 loads total, plus a `probe-<section>.json` per section) — never probe section-by-section** |
 | `node scripts/extract/screenshot.mjs <url> [--selector css --name x ...]` | Extra screenshots at phone/iPad/PC (page.mjs already shot everything once). `--selector`/`--name` repeat — one call, 3 loads, N sections |
 | `node scripts/extract/tokens.mjs` / `css.mjs` / `assets.mjs` / `responsive.mjs` | Single-purpose re-runs of one page.mjs output when something needs refreshing |
-| `node scripts/diff.mjs --original <url> --clone <url> [--selector css] --viewport all [--threshold 95]` | Scored pixel diff, original vs clone. **`--viewport all` scores pc+ipad+phone in one call**, and the per-viewport **band breakdown names the y-range where the mismatch lives** — read it before guessing at causes |
+| `node scripts/diff.mjs --original <url> --clone <url> [--selector css] --viewport all [--threshold 95]` | Scored pixel diff, original vs clone. **`--viewport all` scores pc+ipad+phone in one call**, and the per-viewport **band breakdown names the y-range where the mismatch lives** — read it before guessing at causes. **Batched sweep: `--route </r>` (or repeated `--section name=css`) scores every section of a page from ONE load per side per viewport.** Original-side shots are cached 24h, so fix-iteration re-diffs only re-render the clone (`--fresh-original` to override) |
 | `node scripts/lint-spec.mjs <spec.md\|dir>` | Mechanical spec-completeness gate — must pass before ANY builder dispatch |
 | `node scripts/manifest.mjs <cmd>` | Pipeline state: init / add-page / add-section / set / status / next |
 
@@ -58,7 +58,7 @@ Browser MCP (Chrome MCP, Playwright MCP — if available) is for **judgment work
 
 8. **The extraction JSON is ground truth; the spec is a summary of it.** If a builder finds the spec disagreeing with `sections/<name>.json` or `responsive.json`, the JSON wins — say so explicitly in every builder prompt and have the builder report the discrepancy so you can correct the spec.
 9. **Spec files are the contract.** No spec → no builder. lint-spec must pass → then dispatch.
-10. **The build must always compile.** Builders verify `npx tsc --noEmit`; you verify `npm run build` after every merge.
+10. **The build must always compile.** Builders verify `npx tsc --noEmit`; you verify `npm run typecheck && npm run lint` after every merge. Full `npm run build` runs only at checkpoints (Phase 0, end of Phase 2, once mid-way through Phase 3, Phase 4, completion) — it takes 30–60s and running it per merge serializes otherwise-parallel builders.
 11. **The manifest is updated at every stage transition.** That's what makes the run resumable.
 
 ## Phase 0 — Crawl & Scope
@@ -101,13 +101,22 @@ Work through `manifest.mjs next` until no sections remain. For each section:
 ### 3a. Extract
 
 **The default state is already extracted** — Phase 1's page.mjs run wrote
-`sections/<name>.json`, `responsive.json`, and all screenshots. Per section, only two
-things remain:
+`sections/<name>.json`, `responsive.json`, and all screenshots.
+
+**First time you enter Phase 3 for a page, probe ALL its sections in ONE call** (3
+page loads total instead of 3 per section — never probe section-by-section):
 
 ```bash
-# 1. Per-viewport probe table for the spec's Responsive section (batch several selectors)
-node scripts/extract/probe.mjs <page-url> --selector "<sel>" --selector "<sel> h2"
-# 2. Per discovered behavior — one call per state (batch selectors sharing a trigger):
+node scripts/extract/probe.mjs --route <r>   # every registered section + probe-<section>.json each
+# add key children in the same call when a spec will need them:
+node scripts/extract/probe.mjs --route <r> --selector "<sel> h2" --selector "<sel> .card"
+```
+
+Slice the per-section tables into each spec's Responsive section as you write it.
+Per section, only one thing remains:
+
+```bash
+# Per discovered behavior — one call per state (batch selectors sharing a trigger):
 node scripts/extract/section.mjs <page-url> --selector "<sel>" --name <name>-hover --state hover:".card"
 node scripts/extract/section.mjs <page-url> --selector "<sel>" --name <name>-scrolled --state scroll:600
 # per tab/pill state: --state click:".tab-2" etc. EVERY state, not just the default.
@@ -179,7 +188,9 @@ Every builder receives IN ITS PROMPT (never "go read the file"):
 Complex section (3+ distinct sub-components) → one builder per sub-component + one for the wrapper, sub-components first. **Don't wait** — while builders run, extract the next section.
 
 ### 3e. Merge
-As builders finish: merge worktree → `npm run build` → fix type errors immediately → `manifest.mjs set … --stage merged`.
+As builders finish: merge worktree → `npm run typecheck && npm run lint` → fix errors immediately → `manifest.mjs set … --stage merged`. tsc catches the cross-worktree breaks (imports, prop types) that per-merge builds used to catch, in a fraction of the time.
+
+**Once, after roughly half the page's sections are merged: run a full `npm run build` checkpoint.** It catches build-only failures (server/client component violations, route exports, metadata) while they're still cheap to bisect. Don't build after every merge.
 
 ## Phase 4 — Page Assembly
 
@@ -187,11 +198,17 @@ Per page: create `src/app/<route>/page.tsx` importing its section components wit
 
 ## Phase 5 — Scored QA Loop
 
-Start the clone: `npm run dev` (background). Then **one call per section scores all three viewports**:
+Start the clone: `npm run dev` (background). Then **score the whole page's sections in ONE batched call** (one load per side per viewport instead of one per section):
+
+```bash
+node scripts/diff.mjs --original <orig-page-url> --clone http://localhost:3000<route> --route <r> --viewport all
+node scripts/manifest.mjs set --route <r> --section <name> --score pc=<match>   # per section × viewport
+```
+
+**Fix iterations stay single-section** — the original-side shots captured by the sweep are cached, so a re-diff only re-renders the clone:
 
 ```bash
 node scripts/diff.mjs --original <orig-page-url> --clone http://localhost:3000<route> --selector "<sel>" --viewport all --name <name>
-node scripts/manifest.mjs set --route <r> --section <name> --score pc=<match>   # per viewport
 ```
 
 - **Pass = ≥95% on all three viewports** → `--stage qa_passed`
