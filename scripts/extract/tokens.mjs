@@ -55,21 +55,49 @@ const tokens = await page.evaluate(() => {
     };
   }
 
-  // :root custom properties (same-origin stylesheets only)
+  // :root custom properties + @keyframes bodies (same-origin stylesheets only).
+  // Capturing keyframes matters: computed styles tell you `animation: slide-up-fade 1s`
+  // but not what slide-up-fade DOES. Without the rule body a builder can only guess.
   const cssVars = {};
-  for (const sheet of document.styleSheets) {
-    let rules;
-    try {
-      rules = sheet.cssRules;
-    } catch {
-      continue; // cross-origin sheet
-    }
+  const keyframes = {};
+  const walkRules = (rules) => {
     for (const rule of rules) {
+      // CSSKeyframesRule
+      if (rule.type === 7 || rule.constructor?.name === "CSSKeyframesRule") {
+        const steps = {};
+        for (const kf of rule.cssRules) steps[kf.keyText] = kf.style.cssText;
+        keyframes[rule.name] = steps;
+        continue;
+      }
+      // nested groups: @media, @supports, @layer
+      if (rule.cssRules) {
+        try {
+          walkRules(rule.cssRules);
+        } catch { /* ignore */ }
+        continue;
+      }
       if (rule.selectorText === ":root" || rule.selectorText === "html") {
         for (const prop of rule.style) {
           if (prop.startsWith("--")) cssVars[prop] = rule.style.getPropertyValue(prop).trim();
         }
       }
+    }
+  };
+  for (const sheet of document.styleSheets) {
+    try {
+      walkRules(sheet.cssRules);
+    } catch {
+      continue; // cross-origin sheet
+    }
+  }
+
+  // Which animations are actually used on the page, and on how many elements
+  const animationsInUse = {};
+  for (const el of els) {
+    const cs = getComputedStyle(el);
+    if (cs.animationName && cs.animationName !== "none") {
+      const key = `${cs.animationName} | ${cs.animationDuration} | ${cs.animationTimingFunction} | ${cs.animationIterationCount} | delay ${cs.animationDelay}`;
+      animationsInUse[key] = (animationsInUse[key] || 0) + 1;
     }
   }
 
@@ -101,6 +129,8 @@ const tokens = await page.evaluate(() => {
     borderRadii: top(radii, 10),
     boxShadows: top(shadows, 10),
     cssVariables: cssVars,
+    keyframes,
+    animationsInUse,
     fontLinks,
     globalBehaviors,
   };
@@ -108,4 +138,4 @@ const tokens = await page.evaluate(() => {
 await browser.close();
 
 writeJson(`docs/research/${hostOf(url)}/tokens.json`, { url, generatedAt: new Date().toISOString(), ...tokens });
-console.log(`Colors: ${tokens.colors.length} · Fonts: ${tokens.fontFamilies.length} · CSS vars: ${Object.keys(tokens.cssVariables).length}`);
+console.log(`Colors: ${tokens.colors.length} · Fonts: ${tokens.fontFamilies.length} · CSS vars: ${Object.keys(tokens.cssVariables).length} · @keyframes: ${Object.keys(tokens.keyframes).length} · animations in use: ${Object.keys(tokens.animationsInUse).length}`);
