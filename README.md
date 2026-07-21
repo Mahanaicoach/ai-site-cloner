@@ -37,6 +37,10 @@ Point it at a URL. `/clone-website` crawls the site, measures everything with sc
 | Single-page only | `scripts/extract/crawl.mjs` — sitemap + nav discovery, shared header/footer extracted once |
 | Clone is a dead-end copy | Content in `src/data/*.ts` + `/restyle` skill = rebrand without breaking layout |
 
+## Example
+
+[`examples/forty/`](examples/forty/) is a real end-to-end run against the HTML5 UP "Forty" demo — side-by-side screenshots, the four spec files that drove the build, the per-viewport score table (95–99% at desktop), and the eight tooling bugs that run exposed and fixed.
+
 ## Pipeline
 
 ```
@@ -59,6 +63,7 @@ node scripts/extract/assets.mjs <url>                  # download all images/vid
 node scripts/extract/section.mjs <url> --selector "x"  # computed styles (+ --state for hover/scroll/click diffs)
 node scripts/extract/screenshot.mjs <url>              # phone/iPad/PC screenshots
 node scripts/extract/responsive.mjs <url>              # real layout changes across viewports
+node scripts/extract/probe.mjs <url> --selector "x"    # per-viewport value table for specs
 node scripts/diff.mjs --original <url> --clone <url>   # scored pixel diff
 node scripts/lint-spec.mjs docs/research/components    # spec completeness gate
 node scripts/manifest.mjs status                       # pipeline state / resume point

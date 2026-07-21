@@ -104,6 +104,36 @@ for (const file of files) {
     if (!/getComputedStyle|px|rem|rgb|oklch/.test(body)) {
       errors.push("No concrete CSS values found in body — computed styles must be extracted, not described");
     }
+
+    // The Responsive section must carry MEASURED NUMBERS for all three viewports,
+    // not prose. Real-site testing showed that specs saying "iPad: same layout"
+    // make builders guess intermediate values, and every guess costs QA points on
+    // sites whose spacing scales with root font-size.
+    const rIdx = body.indexOf("## Responsive Behavior");
+    if (rIdx !== -1) {
+      const rEnd = body.indexOf("\n## ", rIdx + 1);
+      const rBody = body.slice(rIdx, rEnd === -1 ? undefined : rEnd);
+      const perViewport = { phone: /phone|390/i, ipad: /ipad|tablet|768/i, pc: /pc|desktop|1440/i };
+      for (const [vp, re] of Object.entries(perViewport)) {
+        const line = rBody.split("\n").find((l) => re.test(l));
+        if (!line) {
+          errors.push(`Responsive Behavior has no line for "${vp}" — all three viewports must be documented`);
+          continue;
+        }
+        // Strip the viewport width itself, then demand at least two real measurements
+        const measurements = line.replace(/\b(390|768|1440)\b/g, "").match(/\d+(\.\d+)?\s*(px|rem|%|col)/gi) || [];
+        if (measurements.length < 2) {
+          errors.push(
+            `Responsive Behavior "${vp}" needs at least 2 measured values with units (e.g. "h2 28px, padding 48px, 2 cols") — got ${measurements.length}. Copy real numbers from responsive.json instead of describing the layout.`
+          );
+        }
+        if (/\b(same|unchanged|identical|as above|no change)\b/i.test(line) && measurements.length < 3) {
+          errors.push(
+            `Responsive Behavior "${vp}" says "same/unchanged" — spell out the actual values. Sites that scale with root font-size change every number between breakpoints even when the layout looks identical.`
+          );
+        }
+      }
+    }
   }
 
   if (errors.length) {

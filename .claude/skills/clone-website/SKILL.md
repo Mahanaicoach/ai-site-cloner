@@ -30,7 +30,7 @@ User-provided instructions override these defaults.
 
 ## Tooling
 
-Nine scripts do the mechanical work — **use them instead of hand-measuring via browser MCP**:
+Ten scripts do the mechanical work — **use them instead of hand-measuring via browser MCP**:
 
 | Script | Purpose |
 |---|---|
@@ -39,7 +39,8 @@ Nine scripts do the mechanical work — **use them instead of hand-measuring via
 | `node scripts/extract/assets.mjs <url>` | Enumerate + download all images/videos/SVGs/favicons/fonts → `public/`, `assets.json` |
 | `node scripts/extract/section.mjs <url> --selector "css" [--name x] [--state scroll:600\|click:sel\|hover:sel] [--viewport pc\|ipad\|phone]` | Full computed-style DOM walk of one section; `--state` captures a second state and diffs them |
 | `node scripts/extract/screenshot.mjs <url> [--selector css] [--name x]` | Screenshots at phone/iPad/PC → `docs/design-references/<host>/` |
-| `node scripts/extract/responsive.mjs <url> [--selector css]` | Measures every section's real layout (actual column counts, hidden elements, font sizes) at all 3 viewports → `responsive.json` |
+| `node scripts/extract/responsive.mjs <url> [--selector css]` | Auto-detects sections and measures each one's real layout (actual column counts, hidden elements, font sizes) at all 3 viewports → `responsive.json` |
+| `node scripts/extract/probe.mjs <url> --selector "css" [--selector "css2"] [--props a,b,c]` | Exact computed values for specific selectors at all 3 viewports, as a markdown table with a **varies** column — paste straight into a spec's Responsive section |
 | `node scripts/diff.mjs --original <url> --clone <url> [--selector css] [--viewport pc] [--threshold 95]` | Scored pixel diff, original vs clone |
 | `node scripts/lint-spec.mjs <spec.md\|dir>` | Mechanical spec-completeness gate — must pass before ANY builder dispatch |
 | `node scripts/manifest.mjs <cmd>` | Pipeline state: init / add-page / add-section / set / status / next |
@@ -54,10 +55,12 @@ Browser MCP (Chrome MCP, Playwright MCP — if available) is for **judgment work
 4. **Foundation first.** Tokens, fonts, types, icons, and shared chrome (header/footer) before any page section.
 5. **Extract how it looks AND how it behaves.** Every interactive element needs before/after states with exact values — `section.mjs --state` produces the diff mechanically.
 6. **Identify the interaction model before building.** Scroll-driven vs click-driven confusion is the most expensive mistake in cloning — a wrong call means a rewrite, not a CSS fix. Scroll first without clicking and watch; only then click. Record the model in the spec frontmatter.
-7. **Responsive is measured, never guessed.** The Responsive section of every spec is filled from `responsive.json` — real column counts at 390/768/1440.
-8. **Spec files are the contract.** No spec → no builder. lint-spec must pass → then dispatch.
-9. **The build must always compile.** Builders verify `npx tsc --noEmit`; you verify `npm run build` after every merge.
-10. **The manifest is updated at every stage transition.** That's what makes the run resumable.
+7. **Responsive is measured, never guessed — at all three widths.** Fill every spec's Responsive section from `responsive.json` + `probe.mjs`, with real numbers for phone AND iPad AND pc. Never write "iPad: same as desktop": most production sites step their root font-size at breakpoints, so *every* padding, margin, and font size changes even when the layout looks identical. A spec that only nails desktop produces a clone that scores ~98% at 1440px and ~91% at 390px. `lint-spec.mjs` rejects vague responsive sections.
+
+8. **The extraction JSON is ground truth; the spec is a summary of it.** If a builder finds the spec disagreeing with `sections/<name>.json` or `responsive.json`, the JSON wins — say so explicitly in every builder prompt and have the builder report the discrepancy so you can correct the spec.
+9. **Spec files are the contract.** No spec → no builder. lint-spec must pass → then dispatch.
+10. **The build must always compile.** Builders verify `npx tsc --noEmit`; you verify `npm run build` after every merge.
+11. **The manifest is updated at every stage transition.** That's what makes the run resumable.
 
 ## Phase 0 — Crawl & Scope
 
@@ -101,7 +104,8 @@ Work through `manifest.mjs next` until no sections remain. For each section:
 ### 3a. Extract
 ```bash
 node scripts/extract/screenshot.mjs <page-url> --selector "<sel>" --name <name>          # all 3 viewports
-node scripts/extract/section.mjs <page-url> --selector "<sel>" --name <name>             # computed styles + text
+node scripts/extract/section.mjs <page-url> --selector "<sel>" --name <name>             # computed styles + text (incl. ::before/::after)
+node scripts/extract/probe.mjs <page-url> --selector "<sel>" --selector "<sel> h2"        # per-viewport table for the Responsive section
 # per discovered behavior — one call per state:
 node scripts/extract/section.mjs <page-url> --selector "<sel>" --name <name>-hover --state hover:".card"
 node scripts/extract/section.mjs <page-url> --selector "<sel>" --name <name>-scrolled --state scroll:600
@@ -162,6 +166,7 @@ Every builder receives IN ITS PROMPT (never "go read the file"):
 - Shared imports available: `cn()`, `icons.tsx` components, shadcn `ui/` primitives, types from `src/types/`
 - The target file path, and the data file to create in `src/data/` if the section has content collections
 - The rule: verify `npx tsc --noEmit` passes before finishing
+- **The ground-truth rule:** "`docs/research/<host>/sections/<name>.json` and `responsive.json` are ground truth. If this spec contradicts them, follow the JSON and report the discrepancy." Builders reliably catch spec errors this way — treat their reports as corrections to make to the spec file.
 
 Complex section (3+ distinct sub-components) → one builder per sub-component + one for the wrapper, sub-components first. **Don't wait** — while builders run, extract the next section.
 
@@ -185,6 +190,8 @@ node scripts/manifest.mjs set --route <r> --section <name> --score pc=<match>
 - Below 95% → open the diff image in `docs/research/qa/`, find the discrepancy, check the spec (wrong extraction → re-extract and fix; right spec, wrong build → fix component), re-diff
 - A large height mismatch reported by diff.mjs = missing content or wrong spacing — fix before pixel-tweaking
 - Max 3 fix iterations per section, then record the gap honestly and move on
+- **Text-heavy sections at phone width often plateau at 90–95%** when the target's font isn't available on Google Fonts (e.g. Source Sans Pro → Source Sans 3). Different metrics = different wrap points = unavoidable pixel drift. Confirm the layout matches, note the substitution, and accept it.
+- **A score that's high at pc but low at ipad/phone is always a responsive-spec problem**, not a styling bug. Re-run `probe.mjs` on the section and fill in the values the spec was missing.
 - Finally, test behaviors manually: scroll, click every tab, hover — screenshots can't verify motion; you must
 
 Whole-page diffs (`--selector` omitted) at all 3 viewports close out each page.
@@ -200,6 +207,9 @@ Whole-page diffs (`--selector` omitted) at all 3 viewports close out each page.
 - **Don't reference docs from builder prompts** — spec contents go inline.
 - **Don't skip the manifest updates.** An untracked run can't resume.
 - **Don't hardcode content in components.** Content → `src/data/`, components take props.
+- **Don't write "same as desktop" in a Responsive section.** Root font-size steps at breakpoints on most real sites, so every number changes. Run `probe.mjs` and write the real values for all three widths — lint-spec now rejects vague responsive sections.
+- **Don't forget `::before` / `::after`.** They carry hero overlays, heading underline bars, and icon glyphs. `section.mjs` captures them under a `pseudo` key — if a spec has none and the screenshot shows decorations, extraction was incomplete.
+- **Don't trust the spec over the extraction JSON.** Specs are hand-written summaries and drift; `sections/*.json` is machine-measured.
 - **Don't declare done without QA scores.** "Looks right" is not a number.
 
 ## Completion Report

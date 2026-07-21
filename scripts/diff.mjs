@@ -3,7 +3,10 @@
 //
 // File mode:  node scripts/diff.mjs --a original.png --b clone.png [--out diff.png]
 // Live mode:  node scripts/diff.mjs --original <url> --clone <url> [--selector css]
-//               [--viewport pc|ipad|phone] [--name hero]
+//               [--clone-selector css] [--viewport pc|ipad|phone] [--name hero]
+//
+// --selector applies to both sides; --clone-selector overrides it for the clone
+// when your component's markup uses different hooks than the target's.
 //
 // Prints a match % (higher = closer). Exit code 1 if --threshold given and not met.
 // Live-mode artifacts land in docs/research/qa/.
@@ -41,7 +44,7 @@ if (args.original && args.clone) {
   const dir = "docs/research/qa";
   mkdirSync(dir, { recursive: true });
   fileA = await shoot(args.original, `${dir}/${name}-${vp}-original.png`, VIEWPORTS[vp], args.selector);
-  fileB = await shoot(args.clone, `${dir}/${name}-${vp}-clone.png`, VIEWPORTS[vp], args.selector);
+  fileB = await shoot(args.clone, `${dir}/${name}-${vp}-clone.png`, VIEWPORTS[vp], args["clone-selector"] || args.selector);
   outPath = outPath || `${dir}/${name}-${vp}-diff.png`;
 }
 if (!fileA || !fileB) {
