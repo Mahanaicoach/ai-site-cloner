@@ -1,7 +1,9 @@
 // Shared helpers for all extraction/QA scripts.
 import { chromium } from "playwright";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { PNG } from "pngjs";
+import { mkdirSync, writeFileSync, readFileSync, renameSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { dirname, join } from "node:path";
 
 // The three viewports every extraction and QA step must cover.
 export const VIEWPORTS = {
@@ -61,18 +63,80 @@ const CONTEXT_OPTS = {
 };
 
 // ---------------------------------------------------------------------------
-// In-process response cache
+// Response cache: memory -> disk -> network
 //
 // Every context has an isolated HTTP cache, so a 3-viewport run downloads every
-// image, font and script three times — and page.mjs loads the same page many
-// more. Cache static subresources once per process and replay them. GET-only,
-// static resource types only (documents and XHR always hit the network).
+// image, font and script three times — and a full clone run spawns ~100 separate
+// script processes against the same site. The memory layer serves repeats within
+// one process; the disk layer (docs/research/.cache/) survives across processes,
+// so probe/section/diff runs after page.mjs load subresources from disk instead
+// of the network. GET-only, static resource types only (documents and XHR always
+// hit the network). `manifest.mjs init --force` wipes the disk layer, and stale
+// entries expire after CACHE_TTL (SITE_CLONER_CACHE_TTL_H hours, default 24).
+// Set SITE_CLONER_NO_CACHE=1 to bypass caching entirely.
 // ---------------------------------------------------------------------------
 const CACHEABLE = new Set(["image", "font", "stylesheet", "script"]);
 const MAX_ENTRY = 4 * 1024 * 1024; // 4 MB per resource
-const MAX_TOTAL = 256 * 1024 * 1024; // 256 MB overall
+const MAX_TOTAL = 256 * 1024 * 1024; // 256 MB overall (memory layer)
+export const CACHE_DIR = "docs/research/.cache";
+const CACHE_TTL_MS = (parseFloat(process.env.SITE_CLONER_CACHE_TTL_H) || 24) * 3600 * 1000;
 const _cache = new Map(); // url -> { body: Buffer, contentType: string }
 let _cacheBytes = 0;
+const _cacheStats = { memHits: 0, diskHits: 0, misses: 0 };
+let _cacheDirReady = false;
+
+// The clone under QA serves /_next/static chunks whose CONTENT changes between
+// fix iterations under stable names — disk-caching loopback origins would keep
+// serving the old build and fake the diff scores. Memory (single process) is safe.
+function isLoopback(url) {
+  const h = new URL(url).hostname;
+  return h === "localhost" || h === "127.0.0.1" || h === "::1" || h === "[::1]";
+}
+
+function diskPathsFor(url) {
+  const key = createHash("sha256").update(url).digest("hex").slice(0, 24);
+  return { bin: join(CACHE_DIR, `${key}.bin`), meta: join(CACHE_DIR, `${key}.json`) };
+}
+
+function diskRead(url) {
+  try {
+    const { bin, meta } = diskPathsFor(url);
+    const m = JSON.parse(readFileSync(meta, "utf8"));
+    if (m.url !== url) return null; // hash-prefix collision — treat as miss
+    if (Date.now() - m.savedAt > CACHE_TTL_MS) return null;
+    return { body: readFileSync(bin), contentType: m.contentType };
+  } catch {
+    return null; // missing/torn/corrupt entry — plain miss
+  }
+}
+
+function diskWrite(url, body, contentType) {
+  try {
+    if (!_cacheDirReady) {
+      mkdirSync(CACHE_DIR, { recursive: true });
+      _cacheDirReady = true;
+    }
+    const { bin, meta } = diskPathsFor(url);
+    // tmp + rename so a concurrent reader never sees a half-written file. The
+    // body lands before the sidecar: a sidecar without its .bin reads as a miss.
+    writeFileSync(`${bin}.${process.pid}.tmp`, body);
+    renameSync(`${bin}.${process.pid}.tmp`, bin);
+    writeFileSync(
+      `${meta}.${process.pid}.tmp`,
+      JSON.stringify({ url, contentType, savedAt: Date.now(), size: body.length })
+    );
+    renameSync(`${meta}.${process.pid}.tmp`, meta);
+  } catch {
+    /* disk cache is best-effort — a failed write is just a future miss */
+  }
+}
+
+function memStore(url, body, contentType) {
+  if (body.length <= MAX_ENTRY && _cacheBytes + body.length <= MAX_TOTAL) {
+    _cache.set(url, { body, contentType });
+    _cacheBytes += body.length;
+  }
+}
 
 async function enableResponseCache(context) {
   await context.route("**/*", async (route) => {
@@ -83,8 +147,18 @@ async function enableResponseCache(context) {
     const url = req.url();
     const hit = _cache.get(url);
     if (hit) {
+      _cacheStats.memHits++;
       return route.fulfill({ status: 200, contentType: hit.contentType, body: hit.body });
     }
+    if (!isLoopback(url)) {
+      const disk = diskRead(url);
+      if (disk) {
+        _cacheStats.diskHits++;
+        memStore(url, disk.body, disk.contentType);
+        return route.fulfill({ status: 200, contentType: disk.contentType, body: disk.body });
+      }
+    }
+    _cacheStats.misses++;
     let res;
     try {
       res = await route.fetch();
@@ -94,10 +168,9 @@ async function enableResponseCache(context) {
     if (res.status() === 200) {
       try {
         const body = await res.body();
-        if (body.length <= MAX_ENTRY && _cacheBytes + body.length <= MAX_TOTAL) {
-          _cache.set(url, { body, contentType: res.headers()["content-type"] || "" });
-          _cacheBytes += body.length;
-        }
+        const contentType = res.headers()["content-type"] || "";
+        memStore(url, body, contentType);
+        if (body.length <= MAX_ENTRY && !isLoopback(url)) diskWrite(url, body, contentType);
       } catch {
         /* body unavailable — just pass the response through */
       }
@@ -118,6 +191,10 @@ export async function closeBrowser() {
   const pending = _browserPromise;
   _browserPromise = null;
   await (await pending).close();
+  const { memHits, diskHits, misses } = _cacheStats;
+  if (memHits + diskHits + misses > 0) {
+    console.error(`  cache: ${memHits} mem, ${diskHits} disk, ${misses} network`);
+  }
 }
 
 // Lazy-loading detection: count IntersectionObservers the page constructs, so
@@ -143,7 +220,7 @@ export async function openPage(viewport = VIEWPORTS.pc, { cache = true } = {}) {
   const browser = await getBrowser();
   const context = await browser.newContext({ viewport, ...CONTEXT_OPTS });
   await instrumentLazySignals(context);
-  if (cache) await enableResponseCache(context);
+  if (cache && !process.env.SITE_CLONER_NO_CACHE) await enableResponseCache(context);
   const page = await context.newPage();
   return { page, context, close: () => context.close() };
 }
@@ -215,38 +292,47 @@ export async function settleLayout(page, { timeout = 3000, quietMs = 150 } = {})
     .catch(() => {});
 }
 
-// Wait until every <img> currently in the DOM has finished loading (or errored).
-// This is the signal networkidle was standing in for on image-heavy pages, and
-// unlike networkidle it can't be held hostage by analytics beacons.
+// Wait until every <img> in the DOM has finished loading (or errored). This is
+// the signal networkidle was standing in for on image-heavy pages, and unlike
+// networkidle it can't be held hostage by analytics beacons. Polls instead of
+// snapshotting once so images inserted AFTER the call starts (late hydration,
+// lazy-load) are still waited on — which is what lets it run concurrently with
+// networkidle instead of after it.
 async function imagesSettled(page, { timeout = 4000 } = {}) {
   await page
-    .evaluate(
-      (timeout) =>
-        Promise.race([
+    .evaluate(async (timeout) => {
+      const deadline = Date.now() + timeout;
+      while (Date.now() < deadline) {
+        const pending = [...document.images].filter((img) => !img.complete);
+        if (!pending.length) return;
+        await Promise.race([
           Promise.all(
-            [...document.images]
-              .filter((img) => !img.complete)
-              .map((img) => new Promise((r) => {
-                img.addEventListener("load", r, { once: true });
-                img.addEventListener("error", r, { once: true });
-              }))
+            pending.map(
+              (img) =>
+                new Promise((r) => {
+                  img.addEventListener("load", r, { once: true });
+                  img.addEventListener("error", r, { once: true });
+                })
+            )
           ),
-          new Promise((r) => setTimeout(r, timeout)),
-        ]),
-      timeout
-    )
+          new Promise((r) => setTimeout(r, 100)), // tick: re-collect for new <img>s
+        ]);
+      }
+    }, timeout)
     .catch(() => {});
 }
 
 export async function gotoAndSettle(page, url) {
   await page.goto(url, { waitUntil: "load", timeout: 60000 });
-  // Four precise signals instead of one long networkidle gamble. Sites with
-  // analytics/websocket chatter never reach networkidle and used to pay the
-  // full 15s on EVERY load — the cap is now 4s and the other three signals
-  // (fonts ready, images decoded, stable height) carry the real guarantee.
-  await page.waitForLoadState("networkidle", { timeout: 4000 }).catch(() => {});
-  await page.evaluate(() => document.fonts?.ready).catch(() => {});
-  await imagesSettled(page);
+  // Precise signals instead of one long networkidle gamble. The three
+  // independent waits run concurrently — their caps race instead of summing —
+  // and settleLayout goes last because stable height depends on fonts and
+  // images having landed.
+  await Promise.all([
+    page.waitForLoadState("networkidle", { timeout: 4000 }).catch(() => {}),
+    page.evaluate(() => document.fonts?.ready).catch(() => {}),
+    imagesSettled(page),
+  ]);
   await settleLayout(page);
 }
 
@@ -274,12 +360,18 @@ export async function autoScroll(page, { force = false } = {}) {
     for (let y = 0; y <= document.documentElement.scrollHeight; y += step) {
       window.scrollTo(0, y);
       // Two frames is enough for observer callbacks to fire and request images;
-      // whether those images *arrive* is what the networkidle wait below covers.
+      // whether those images *arrive* is what the waits below cover.
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     }
     window.scrollTo(0, 0);
   });
-  await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
+  // The real lazy-load guarantee is "the images the scroll requested have
+  // decoded" — imagesSettled states that directly, so networkidle gets the same
+  // 4s cap it has everywhere else instead of the old 10s gamble.
+  await Promise.all([
+    page.waitForLoadState("networkidle", { timeout: 4000 }).catch(() => {}),
+    imagesSettled(page),
+  ]);
   await settleLayout(page);
 }
 
@@ -352,6 +444,87 @@ export async function freezePage(page) {
       )
     );
   });
+}
+
+// Screenshot every section from ONE full-page capture: measure each selector's
+// page-coordinate box, take a single fullPage shot, and crop the sections out of
+// it (deviceScaleFactor is 1, so CSS px == image px). Pixel-identical to a
+// per-section locator.screenshot() chain — same bounding boxes, same frozen
+// page — minus N sequential scroll+shoot round-trips. Bonus fidelity: sticky
+// headers can no longer bleed into mid-page section shots, because nothing
+// scrolls between captures. Call AFTER freezePage so boxes match the pixels.
+//
+// `sections` = [{ name, selector }]; `pathFor(section)` -> output PNG path;
+// `fullPagePath` additionally saves the full-page shot itself.
+// Sections the crop can't produce (selector missing, zero box, page taller than
+// Chromium's capture limit) fall back to a locator screenshot; returns
+// { failed: [names] } for anything neither path could capture.
+export async function shootSectionsFromFullPage(page, sections, { fullPagePath = null, pathFor }) {
+  const boxes = await page
+    .evaluate((sels) => {
+      window.scrollTo(0, 0);
+      const out = {};
+      for (const sel of sels) {
+        const el = document.querySelector(sel);
+        if (!el) {
+          out[sel] = null;
+          continue;
+        }
+        const r = el.getBoundingClientRect();
+        // Round the EDGES, not width/height — for fractional boxes this matches
+        // how the element screenshot clip lands on whole pixels.
+        const x = Math.round(r.x + scrollX);
+        const y = Math.round(r.y + scrollY);
+        out[sel] = {
+          x,
+          y,
+          width: Math.round(r.x + scrollX + r.width) - x,
+          height: Math.round(r.y + scrollY + r.height) - y,
+        };
+      }
+      return out;
+    }, sections.map((s) => s.selector))
+    .catch(() => ({}));
+
+  const buf = await page.screenshot({ fullPage: true, ...(fullPagePath ? { path: fullPagePath } : {}) });
+  let img = null;
+  try {
+    img = PNG.sync.read(buf);
+  } catch {
+    /* unreadable capture — every section falls back below */
+  }
+
+  const fallbacks = [];
+  for (const s of sections) {
+    const b = img && boxes[s.selector];
+    const x = b ? Math.max(0, Math.min(b.x, img.width - 1)) : 0;
+    const y = b ? Math.max(0, Math.min(b.y, img.height - 1)) : 0;
+    const w = b ? Math.min(b.width, img.width - x) : 0;
+    const h = b ? Math.min(b.height, img.height - y) : 0;
+    if (!b || w < 1 || h < 1) {
+      fallbacks.push(s);
+      continue;
+    }
+    try {
+      const out = new PNG({ width: w, height: h });
+      PNG.bitblt(img, out, x, y, w, h, 0, 0);
+      writeFileSync(pathFor(s), PNG.sync.write(out));
+    } catch {
+      fallbacks.push(s);
+    }
+  }
+
+  const failed = [];
+  for (const s of fallbacks) {
+    try {
+      const loc = page.locator(s.selector).first();
+      await loc.scrollIntoViewIfNeeded({ timeout: 3000 });
+      await loc.screenshot({ path: pathFor(s), timeout: 5000 });
+    } catch {
+      failed.push(s.name);
+    }
+  }
+  return { failed };
 }
 
 // Tiny CLI arg parser: --key value / --flag  ->  { _: [positionals], key: value, flag: true }

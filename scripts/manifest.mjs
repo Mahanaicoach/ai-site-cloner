@@ -13,8 +13,8 @@
 //   node scripts/manifest.mjs set --route / --section hero --score pc=96.2
 //   node scripts/manifest.mjs status
 //   node scripts/manifest.mjs next
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
-import { parseArgs } from "./lib.mjs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync } from "node:fs";
+import { parseArgs, CACHE_DIR } from "./lib.mjs";
 
 const FILE = "docs/research/manifest.json";
 const STAGES = ["discovered", "extracted", "specd", "built", "merged", "qa_passed"];
@@ -54,6 +54,8 @@ switch (cmd) {
       console.error(`Manifest already exists (${FILE}). This is a resumable run — use "status". Pass --force to start over.`);
       process.exit(1);
     }
+    // A fresh run starts with a cold response cache — resumed runs keep it.
+    if (args.force) rmSync(CACHE_DIR, { recursive: true, force: true });
     save({ site: url, createdAt: new Date().toISOString(), pages: [] });
     console.log(`Initialized ${FILE} for ${url}`);
     break;

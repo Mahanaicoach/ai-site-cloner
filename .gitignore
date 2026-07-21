@@ -47,3 +47,6 @@ temp/
 
 # Playwright
 .playwright/
+
+# Cross-process response cache (extraction/QA scripts)
+docs/research/.cache/
