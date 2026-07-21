@@ -1,31 +1,50 @@
 #!/usr/bin/env node
-// Deep-extract one section: full computed-style DOM walk + verbatim text + assets.
-// Optionally capture a second state (scroll/click/hover) and diff the two.
+// Deep-extract one or more sections: full computed-style DOM walk + verbatim
+// text + assets. Optionally capture a second state (scroll/click/hover) and
+// diff the two.
 //
 // Usage:
 //   node scripts/extract/section.mjs <url> --selector "header" [--name header]
 //     [--viewport pc|ipad|phone] [--depth 5]
 //     [--state scroll:600 | click:.tab-btn | hover:.card]
 //
+//   --selector and --name repeat, and every section is walked from a SINGLE
+//   page load. Extracting five sections is one navigation, not five:
+//     node scripts/extract/section.mjs <url> \
+//       --selector "#banner" --name banner \
+//       --selector "#one"    --name tiles
+//
 // Output: docs/research/<host>/sections/<name>.json  (stateA/stateB/diff when --state used)
-import { VIEWPORTS, launchPage, gotoAndSettle, autoScroll, hostOf, slugify, writeJson, parseArgs } from "../lib.mjs";
+import {
+  VIEWPORTS,
+  openPage,
+  closeBrowser,
+  gotoAndSettle,
+  autoScroll,
+  transitionMs,
+  hostOf,
+  slugify,
+  writeJson,
+  parseArgs,
+  toList,
+} from "../lib.mjs";
 
 const args = parseArgs(process.argv.slice(2));
 const url = args._[0];
-const selector = args.selector;
-if (!url || !selector) {
+const selectors = toList(args.selector);
+if (!url || !selectors.length) {
   console.error('Usage: node scripts/extract/section.mjs <url> --selector "css" [--name x] [--state scroll:600|click:sel|hover:sel]');
+  console.error("       --selector/--name repeat; all sections extract from one page load.");
   process.exit(1);
 }
+const names = toList(args.name);
 const viewport = VIEWPORTS[args.viewport || "pc"];
 const depth = Number(args.depth ?? 5);
-const name = args.name || slugify(selector);
+const targets = selectors.map((selector, i) => ({ selector, name: names[i] || slugify(selector) }));
 
-const { browser, page } = await launchPage(viewport);
+const { page, close } = await openPage(viewport);
 await gotoAndSettle(page, url);
 await autoScroll(page);
-await page.locator(selector).first().scrollIntoViewIfNeeded().catch(() => {});
-await page.waitForTimeout(600);
 
 // The walker runs in the page. Captures every relevant computed property per element.
 const WALKER = `(function (selector, maxDepth) {
@@ -115,16 +134,47 @@ const WALKER = `(function (selector, maxDepth) {
   return walk(el, 0);
 })`;
 
-const capture = () => page.evaluate(`(${WALKER})(${JSON.stringify(selector)}, ${depth})`);
-
-const stateA = await capture();
-if (stateA.error) {
-  console.error(stateA.error);
-  await browser.close();
-  process.exit(1);
+async function capture(selector) {
+  await page.locator(selector).first().scrollIntoViewIfNeeded().catch(() => {});
+  return page.evaluate(`(${WALKER})(${JSON.stringify(selector)}, ${depth})`);
 }
 
-let result = { url, selector, viewport: args.viewport || "pc", generatedAt: new Date().toISOString() };
+// Style deltas between two captures of the same subtree, element by element.
+// Both real styles and pseudo-element styles count: a hover effect built from a
+// ::before overlay changes nothing on the element itself.
+function diffNode(a, b, path, out) {
+  if (!a || !b || a.error || b.error) return;
+  const keys = new Set([...Object.keys(a.styles || {}), ...Object.keys(b.styles || {})]);
+  for (const k of keys) {
+    if ((a.styles?.[k] || null) !== (b.styles?.[k] || null)) {
+      out.push({ path, prop: k, before: a.styles?.[k] ?? "(unset)", after: b.styles?.[k] ?? "(unset)" });
+    }
+  }
+  for (const pe of ["::before", "::after"]) {
+    const pa = a.pseudo?.[pe] || {};
+    const pb = b.pseudo?.[pe] || {};
+    const pkeys = new Set([...Object.keys(pa), ...Object.keys(pb)]);
+    for (const k of pkeys) {
+      if ((pa[k] || null) !== (pb[k] || null)) {
+        out.push({ path: path + pe, prop: k, before: pa[k] ?? "(unset)", after: pb[k] ?? "(unset)" });
+      }
+    }
+  }
+  (a.children || []).forEach((c, i) => diffNode(c, b.children?.[i], `${path} > ${c.tag}[${i}]`, out));
+}
+
+const meta = { url, viewport: args.viewport || "pc", generatedAt: new Date().toISOString() };
+const stateA = {};
+for (const { selector } of targets) {
+  const tree = await capture(selector);
+  if (tree.error) {
+    console.error(tree.error);
+    await close();
+    await closeBrowser();
+    process.exit(1);
+  }
+  stateA[selector] = tree;
+}
 
 if (args.state) {
   const [kind, ...rest] = String(args.state).split(":");
@@ -133,27 +183,33 @@ if (args.state) {
   if (kind === "scroll") await page.evaluate((y) => window.scrollTo(0, Number(y)), target || "600");
   else if (kind === "click") await page.locator(target).first().click({ timeout: 5000 }).catch((e) => console.error("click failed:", e.message));
   else if (kind === "hover") await page.locator(target).first().hover({ timeout: 5000 }).catch((e) => console.error("hover failed:", e.message));
-  await page.waitForTimeout(800); // let transitions finish
-  const stateB = await capture();
 
-  // diff styles per element path
-  function diffNode(a, b, path, out) {
-    if (!a || !b || a.error || b.error) return;
-    const keys = new Set([...Object.keys(a.styles || {}), ...Object.keys(b.styles || {})]);
-    for (const k of keys) {
-      if ((a.styles?.[k] || null) !== (b.styles?.[k] || null)) {
-        out.push({ path, prop: k, before: a.styles?.[k] ?? "(unset)", after: b.styles?.[k] ?? "(unset)" });
-      }
-    }
-    (a.children || []).forEach((c, i) => diffNode(c, b.children?.[i], `${path} > ${c.tag}[${i}]`, out));
+  // Wait exactly as long as this section's slowest transition, not a flat guess.
+  // A 2.5s overlay fade used to get captured mid-flight and recorded as final.
+  const settle = Math.max(...(await Promise.all(targets.map((t) => transitionMs(page, t.selector)))));
+  await page.waitForTimeout(settle);
+
+  for (const { selector, name } of targets) {
+    const stateB = await capture(selector);
+    const diff = [];
+    diffNode(stateA[selector], stateB, stateA[selector].tag, diff);
+    writeJson(`docs/research/${hostOf(url)}/sections/${name}.json`, {
+      ...meta,
+      selector,
+      trigger: args.state,
+      settleMs: settle,
+      stateA: stateA[selector],
+      stateB,
+      diff,
+    });
+    console.log(`${name}: ${diff.length} properties changed after "${args.state}" (waited ${settle}ms)`);
   }
-  const diff = [];
-  diffNode(stateA, stateB, stateA.tag, diff);
-  result = { ...result, trigger: args.state, stateA, stateB, diff };
-  console.log(`State diff: ${diff.length} properties changed after "${args.state}"`);
 } else {
-  result = { ...result, tree: stateA };
+  for (const { selector, name } of targets) {
+    writeJson(`docs/research/${hostOf(url)}/sections/${name}.json`, { ...meta, selector, tree: stateA[selector] });
+  }
+  console.log(`Extracted ${targets.length} section(s) from one page load.`);
 }
 
-await browser.close();
-writeJson(`docs/research/${hostOf(url)}/sections/${name}.json`, result);
+await close();
+await closeBrowser();

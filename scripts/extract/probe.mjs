@@ -4,24 +4,31 @@
 // because writing "iPad: same as desktop" makes builders guess, and guesses cost
 // QA points on any site whose spacing scales with root font-size.
 //
+// All three viewports load concurrently on one browser.
+//
 // Usage:
 //   node scripts/extract/probe.mjs <url> --selector "section#two" [--selector "h2" ...]
 //   node scripts/extract/probe.mjs <url> --selector "#two" --props fontSize,paddingTop,marginBottom
 //
 // Output: a markdown table per selector (stdout) + docs/research/<host>/probe-<name>.json
-import { VIEWPORTS, launchPage, gotoAndSettle, autoScroll, hostOf, slugify, writeJson } from "../lib.mjs";
+import {
+  VIEWPORTS,
+  forEachViewport,
+  closeBrowser,
+  gotoAndSettle,
+  autoScroll,
+  hostOf,
+  slugify,
+  writeJson,
+  parseArgs,
+  toList,
+} from "../lib.mjs";
 
-// --selector can repeat, so parse args manually rather than with parseArgs()
-const argv = process.argv.slice(2);
-const url = argv.find((a) => !a.startsWith("--") && argv[argv.indexOf(a) - 1]?.startsWith("--") !== true);
-const selectors = [];
-let props = null;
-let name = null;
-for (let i = 0; i < argv.length; i++) {
-  if (argv[i] === "--selector") selectors.push(argv[++i]);
-  else if (argv[i] === "--props") props = argv[++i].split(",");
-  else if (argv[i] === "--name") name = argv[++i];
-}
+const args = parseArgs(process.argv.slice(2));
+const url = args._[0];
+const selectors = toList(args.selector);
+const props = args.props ? String(args.props).split(",") : null;
+const name = typeof args.name === "string" ? args.name : null;
 if (!url || !selectors.length) {
   console.error('Usage: node scripts/extract/probe.mjs <url> --selector "css" [--selector "css2"] [--props a,b,c]');
   process.exit(1);
@@ -49,15 +56,14 @@ const PROBE = `(function (selectors, props) {
   return out;
 })`;
 
-const results = {};
-for (const [vpName, vp] of Object.entries(VIEWPORTS)) {
-  const { browser, page } = await launchPage(vp);
+const results = await forEachViewport(Object.keys(VIEWPORTS), async (page, vpName) => {
   await gotoAndSettle(page, url);
   await autoScroll(page);
-  results[vpName] = await page.evaluate(`(${PROBE})(${JSON.stringify(selectors)}, ${JSON.stringify(USE)})`);
-  await browser.close();
-  console.error(`  ✓ probed @ ${vpName} (${vp.width}px)`);
-}
+  const r = await page.evaluate(`(${PROBE})(${JSON.stringify(selectors)}, ${JSON.stringify(USE)})`);
+  console.error(`  ✓ probed @ ${vpName} (${VIEWPORTS[vpName].width}px)`);
+  return r;
+});
+await closeBrowser();
 
 // Markdown tables — only rows that actually differ across viewports are interesting,
 // but print everything so the spec author can copy what matters.

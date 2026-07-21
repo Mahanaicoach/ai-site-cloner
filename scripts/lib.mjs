@@ -37,35 +37,200 @@ export function writeJson(path, data) {
   console.error(`  ✓ wrote ${path}`);
 }
 
-export async function launchPage(viewport = VIEWPORTS.pc) {
-  const browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext({
-    viewport,
-    userAgent:
-      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-    deviceScaleFactor: 1,
+// ---------------------------------------------------------------------------
+// Browser lifecycle
+//
+// One Chromium per process, shared by every context. Launching costs ~350ms;
+// opening a context on a live browser costs ~40ms. Scripts that touch three
+// viewports used to pay the launch three times — now they pay it once.
+// ---------------------------------------------------------------------------
+
+let _browser = null;
+
+const CONTEXT_OPTS = {
+  userAgent:
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+  deviceScaleFactor: 1,
+};
+
+export async function getBrowser() {
+  if (!_browser) _browser = await chromium.launch({ headless: true });
+  return _browser;
+}
+
+// Every script must call this before exiting — the browser process keeps the
+// Node event loop alive otherwise.
+export async function closeBrowser() {
+  if (_browser) {
+    await _browser.close();
+    _browser = null;
+  }
+}
+
+// Lazy-loading detection: count IntersectionObservers the page constructs, so
+// autoScroll() can tell "this page reveals content on scroll" from "this page
+// is fully painted already" instead of always paying the scroll cost.
+async function instrumentLazySignals(context) {
+  await context.addInitScript(() => {
+    window.__ioCount = 0;
+    const Native = window.IntersectionObserver;
+    if (!Native) return;
+    window.IntersectionObserver = class extends Native {
+      constructor(...a) {
+        super(...a);
+        window.__ioCount++;
+      }
+    };
   });
+}
+
+// Open a page on the shared browser. `close()` disposes only this context.
+export async function openPage(viewport = VIEWPORTS.pc) {
+  const browser = await getBrowser();
+  const context = await browser.newContext({ viewport, ...CONTEXT_OPTS });
+  await instrumentLazySignals(context);
   const page = await context.newPage();
-  return { browser, page };
+  return { page, context, close: () => context.close() };
+}
+
+// Back-compat for single-page scripts written against the older API:
+//   const { browser, page } = await launchPage();  …  await browser.close();
+// `browser.close()` tears down the context AND the shared Chromium, matching the
+// old semantics exactly. Deferring the teardown to a process exit hook would
+// deadlock: Playwright's open socket keeps the event loop alive, so 'beforeExit'
+// never fires and the script hangs instead of exiting.
+export async function launchPage(viewport = VIEWPORTS.pc) {
+  const { page, close } = await openPage(viewport);
+  return {
+    page,
+    browser: {
+      close: async () => {
+        await close();
+        await closeBrowser();
+      },
+    },
+  };
+}
+
+// Run `fn(page, viewportName)` at several viewports concurrently on one browser.
+// Returns results keyed by viewport name. Page loads are the expensive part and
+// they overlap completely here.
+export async function forEachViewport(names, fn) {
+  const entries = await Promise.all(
+    names.map(async (vpName) => {
+      const { page, close } = await openPage(VIEWPORTS[vpName]);
+      try {
+        return [vpName, await fn(page, vpName)];
+      } finally {
+        await close();
+      }
+    })
+  );
+  return Object.fromEntries(entries);
+}
+
+// ---------------------------------------------------------------------------
+// Waiting — conditions, not sleeps
+// ---------------------------------------------------------------------------
+
+// Wait until the document stops growing. Replaces a fixed sleep with the signal
+// the sleep was standing in for: late CSS, webfonts and hero images all change
+// scrollHeight when they land.
+export async function settleLayout(page, { timeout = 3000, quietMs = 150 } = {}) {
+  await page
+    .evaluate(
+      async ({ timeout, quietMs }) => {
+        const deadline = Date.now() + timeout;
+        let last = -1;
+        let stableSince = 0;
+        while (Date.now() < deadline) {
+          const h = document.documentElement.scrollHeight;
+          if (h === last) {
+            if (!stableSince) stableSince = Date.now();
+            if (Date.now() - stableSince >= quietMs) return;
+          } else {
+            last = h;
+            stableSince = 0;
+          }
+          await new Promise((r) => requestAnimationFrame(r));
+        }
+      },
+      { timeout, quietMs }
+    )
+    .catch(() => {});
 }
 
 export async function gotoAndSettle(page, url) {
   await page.goto(url, { waitUntil: "load", timeout: 60000 });
-  await page.waitForTimeout(1500);
+  // Network quiet + fonts ready + stable height are the three things the old
+  // blanket 1500ms was guessing at. On a fast page this returns almost instantly.
+  await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
+  await page.evaluate(() => document.fonts?.ready).catch(() => {});
+  await settleLayout(page);
 }
 
-// Scroll to bottom in steps (triggers lazy-loaded images/animations), then back to top.
-export async function autoScroll(page) {
+// Scroll to bottom in steps (triggers lazy-loaded images/animations), then back
+// to top. Skipped entirely when the page shows no sign of lazy content — pass
+// `{ force: true }` to scroll regardless.
+export async function autoScroll(page, { force = false } = {}) {
+  const needed = force
+    ? true
+    : await page
+        .evaluate(() => {
+          if (window.__ioCount > 0) return true;
+          return !!document.querySelector(
+            'img[loading="lazy"],iframe[loading="lazy"],[data-src],[data-srcset],[data-bg],[data-lazy]'
+          );
+        })
+        .catch(() => true); // if the probe fails, assume the worst and scroll
+
+  if (!needed) return;
+
   await page.evaluate(async () => {
+    // Half-viewport steps: IntersectionObserver thresholds commonly need an
+    // element substantially in view, and a full-viewport jump can skip them.
     const step = window.innerHeight / 2;
-    const max = document.body.scrollHeight;
-    for (let y = 0; y <= max; y += step) {
+    for (let y = 0; y <= document.documentElement.scrollHeight; y += step) {
       window.scrollTo(0, y);
-      await new Promise((r) => setTimeout(r, 120));
+      // Two frames is enough for observer callbacks to fire and request images;
+      // whether those images *arrive* is what the networkidle wait below covers.
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     }
     window.scrollTo(0, 0);
   });
-  await page.waitForTimeout(800);
+  await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
+  await settleLayout(page);
+}
+
+// How long the transitions inside `selector` actually take, in ms — so a state
+// capture can wait exactly that long instead of guessing. Covers ::before and
+// ::after, where hover overlays usually live.
+export async function transitionMs(page, selector, { min = 150, max = 4000 } = {}) {
+  const ms = await page
+    .evaluate(
+      ({ selector, max }) => {
+        const root = document.querySelector(selector);
+        if (!root) return 0;
+        const els = [root, ...root.querySelectorAll("*")].slice(0, 500);
+        const nums = (v) => String(v || "").split(",").map((s) => parseFloat(s) || 0);
+        let worst = 0;
+        for (const el of els) {
+          for (const pe of [null, "::before", "::after"]) {
+            const cs = getComputedStyle(el, pe);
+            const dur = nums(cs.transitionDuration);
+            const delay = nums(cs.transitionDelay);
+            for (let i = 0; i < dur.length; i++) {
+              worst = Math.max(worst, (dur[i] + (delay[i] || 0)) * 1000);
+            }
+          }
+          if (worst >= max) return max;
+        }
+        return worst;
+      },
+      { selector, max }
+    )
+    .catch(() => 0);
+  return Math.min(max, Math.max(min, Math.round(ms)));
 }
 
 // Kill animations/transitions/videos so screenshots are deterministic (for QA diffs).
@@ -83,6 +248,7 @@ export async function freezePage(page) {
 }
 
 // Tiny CLI arg parser: --key value / --flag  ->  { _: [positionals], key: value, flag: true }
+// A repeated key collects into an array (--selector a --selector b -> ["a","b"]).
 export function parseArgs(argv) {
   const out = { _: [] };
   for (let i = 0; i < argv.length; i++) {
@@ -90,15 +256,19 @@ export function parseArgs(argv) {
     if (a.startsWith("--")) {
       const key = a.slice(2);
       const next = argv[i + 1];
-      if (next !== undefined && !next.startsWith("--")) {
-        out[key] = next;
-        i++;
-      } else {
-        out[key] = true;
-      }
+      const val = next !== undefined && !next.startsWith("--") ? (i++, next) : true;
+      if (key in out) out[key] = [].concat(out[key], val);
+      else out[key] = val;
     } else {
       out._.push(a);
     }
   }
   return out;
+}
+
+// Normalise a possibly-repeated arg into an array. `--selector x` and
+// `--selector x --selector y` both come back as arrays.
+export function toList(v) {
+  if (v === undefined || v === true) return [];
+  return [].concat(v);
 }

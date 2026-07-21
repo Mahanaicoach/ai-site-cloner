@@ -13,24 +13,27 @@
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { PNG } from "pngjs";
 import pixelmatch from "pixelmatch";
-import { VIEWPORTS, launchPage, gotoAndSettle, autoScroll, freezePage, slugify, parseArgs } from "./lib.mjs";
+import { VIEWPORTS, openPage, closeBrowser, gotoAndSettle, autoScroll, freezePage, slugify, parseArgs } from "./lib.mjs";
 
 const args = parseArgs(process.argv.slice(2));
 
 async function shoot(url, path, viewport, selector) {
-  const { browser, page } = await launchPage(viewport);
-  await gotoAndSettle(page, url);
-  await autoScroll(page);
-  await freezePage(page); // deterministic pixels: no animations, paused videos
-  if (selector) {
-    const loc = page.locator(selector).first();
-    await loc.scrollIntoViewIfNeeded();
-    await page.waitForTimeout(400);
-    await loc.screenshot({ path });
-  } else {
-    await page.screenshot({ path, fullPage: true });
+  const { page, close } = await openPage(viewport);
+  try {
+    await gotoAndSettle(page, url);
+    // Full-page shots must include lazy content; section shots need only the section.
+    await autoScroll(page, { force: !selector });
+    await freezePage(page); // deterministic pixels: no animations, paused videos
+    if (selector) {
+      const loc = page.locator(selector).first();
+      await loc.scrollIntoViewIfNeeded();
+      await loc.screenshot({ path });
+    } else {
+      await page.screenshot({ path, fullPage: true });
+    }
+  } finally {
+    await close();
   }
-  await browser.close();
   return path;
 }
 
@@ -43,8 +46,12 @@ if (args.original && args.clone) {
   const name = args.name || slugify(args.selector || "page");
   const dir = "docs/research/qa";
   mkdirSync(dir, { recursive: true });
-  fileA = await shoot(args.original, `${dir}/${name}-${vp}-original.png`, VIEWPORTS[vp], args.selector);
-  fileB = await shoot(args.clone, `${dir}/${name}-${vp}-clone.png`, VIEWPORTS[vp], args["clone-selector"] || args.selector);
+  // Both sides shoot concurrently on one browser — they're independent pages.
+  [fileA, fileB] = await Promise.all([
+    shoot(args.original, `${dir}/${name}-${vp}-original.png`, VIEWPORTS[vp], args.selector),
+    shoot(args.clone, `${dir}/${name}-${vp}-clone.png`, VIEWPORTS[vp], args["clone-selector"] || args.selector),
+  ]);
+  await closeBrowser();
   outPath = outPath || `${dir}/${name}-${vp}-diff.png`;
 }
 if (!fileA || !fileB) {

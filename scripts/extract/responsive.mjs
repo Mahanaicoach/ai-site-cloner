@@ -7,7 +7,7 @@
 // Usage: node scripts/extract/responsive.mjs <url> [--selector "css"]
 //   (no --selector = auto-detect top-level sections: header, main children, footer)
 // Output: docs/research/<host>/responsive.json
-import { VIEWPORTS, launchPage, gotoAndSettle, autoScroll, hostOf, writeJson, parseArgs } from "../lib.mjs";
+import { VIEWPORTS, openPage, closeBrowser, gotoAndSettle, autoScroll, hostOf, writeJson, parseArgs } from "../lib.mjs";
 
 const args = parseArgs(process.argv.slice(2));
 const url = args._[0];
@@ -179,23 +179,35 @@ let sections = null;
 // indistinguishable by height.
 const ORDER = ["pc", "ipad", "phone"].filter((v) => VIEWPORTS[v]);
 
-for (const vpName of ORDER) {
-  const vp = VIEWPORTS[vpName];
-  const { browser, page } = await launchPage(vp);
-  await gotoAndSettle(page, url);
-  await autoScroll(page);
-  if (!sections) {
-    sections = args.selector
-      ? [{ selector: args.selector, label: args.selector }]
-      : await page.evaluate(`(${DETECT})()`);
-  }
-  results[vpName] = {};
-  for (const s of sections) {
-    results[vpName][s.selector] = await page.evaluate(`(${SIGNATURE})(${JSON.stringify(s.selector)})`);
-  }
-  await browser.close();
-  console.error(`  ✓ measured ${sections.length} sections @ ${vpName} (${vp.width}px)`);
-}
+// Load all three viewports concurrently — that's the slow part and the three
+// loads are independent. Detection still happens on PC alone, then every
+// viewport measures the same section list.
+const loaded = await Promise.all(
+  ORDER.map(async (vpName) => {
+    const { page, close } = await openPage(VIEWPORTS[vpName]);
+    await gotoAndSettle(page, url);
+    await autoScroll(page);
+    return { vpName, page, close };
+  })
+);
+
+const pcPage = (loaded.find((l) => l.vpName === "pc") || loaded[0]).page;
+sections = args.selector
+  ? [{ selector: args.selector, label: args.selector }]
+  : await pcPage.evaluate(`(${DETECT})()`);
+
+await Promise.all(
+  loaded.map(async ({ vpName, page, close }) => {
+    const measured = {};
+    for (const s of sections) {
+      measured[s.selector] = await page.evaluate(`(${SIGNATURE})(${JSON.stringify(s.selector)})`);
+    }
+    results[vpName] = measured;
+    await close();
+    console.error(`  ✓ measured ${sections.length} sections @ ${vpName} (${VIEWPORTS[vpName].width}px)`);
+  })
+);
+await closeBrowser();
 
 // Build human-readable change summaries per section
 const summarize = (sel) => {
