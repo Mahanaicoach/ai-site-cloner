@@ -12,14 +12,28 @@
 // Recording uses canvas.captureStream(), so the file holds the canvas's own
 // pixels only — no page chrome, no page-load frames before the artwork appears.
 //
+// ONE page load serves the whole script: inventory, animation detection,
+// recording, fallback stills and posters all come from the same live page
+// (recordings stay sequential on purpose — sites pause offscreen canvases via
+// IntersectionObserver, so only the scrolled-into-view one is guaranteed to
+// be animating).
+//
 // Usage:
 //   node scripts/extract/canvas.mjs <url> [--seconds 6] [--index 0] [--all]
 // Output: public/images/canvas-<n>.png or public/videos/canvas-<n>.webm
 //         + docs/research/<host>/canvas.json
-import { chromium } from "playwright";
 import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { VIEWPORTS, hostOf, writeJson, parseArgs } from "../lib.mjs";
+import {
+  VIEWPORTS,
+  openPage,
+  closeBrowser,
+  gotoAndSettle,
+  autoScroll,
+  hostOf,
+  writeJson,
+  parseArgs,
+} from "../lib.mjs";
 
 const args = parseArgs(process.argv.slice(2));
 const url = args._[0];
@@ -29,12 +43,11 @@ if (!url) {
 }
 const SECONDS = Number(args.seconds ?? 6);
 
-// ── 1. Inventory every canvas on the page ─────────────────────────────
-const browser = await chromium.launch();
-let ctx = await browser.newContext({ viewport: VIEWPORTS.pc });
-let page = await ctx.newPage();
-await page.goto(url, { waitUntil: "load", timeout: 60000 });
-await page.waitForTimeout(3000);
+// ── 1. Load once, at a width where hero artwork is actually visible ───
+// (responsive rules commonly hide canvas art below the `lg` breakpoint)
+const { page, close } = await openPage(VIEWPORTS.pc);
+await gotoAndSettle(page, url);
+await autoScroll(page); // mounts lazily-initialized canvases, returns to top
 
 const inventory = await page.evaluate(() =>
   [...document.querySelectorAll("canvas")].map((c, i) => {
@@ -56,7 +69,8 @@ const inventory = await page.evaluate(() =>
 
 if (!inventory.length) {
   console.log("No <canvas> elements on this page.");
-  await browser.close();
+  await close();
+  await closeBrowser();
   process.exit(0);
 }
 console.error(`Found ${inventory.length} canvas element(s)`);
@@ -67,7 +81,7 @@ const targets = args.all ? inventory : [inventory[Number(args.index ?? 0)]].filt
 for (const t of targets) {
   const loc = page.locator("canvas").nth(t.index);
   await loc.scrollIntoViewIfNeeded().catch(() => {});
-  await page.waitForTimeout(600);
+  await page.waitForTimeout(600); // guard: the animation loop may not have started yet
   const hashes = [];
   for (let i = 0; i < 4; i++) {
     const buf = await loc.screenshot();
@@ -85,9 +99,8 @@ for (const t of targets) {
     console.error(`    ✓ ${t.output}`);
   }
 }
-await ctx.close();
 
-// ── 3. Record the animated ones ───────────────────────────────────────
+// ── 3. Record the animated ones — from the SAME live page ─────────────
 // Record the canvas's own output stream rather than the viewport. Playwright's
 // recordVideo starts when the context opens, so it always captures the page load
 // and pre-isolation chrome ahead of the artwork; captureStream() yields exactly
@@ -115,18 +128,11 @@ const CAPTURE = `async (index, ms) => {
 }`;
 
 for (const t of targets.filter((x) => x.animated)) {
-  // The page must render at a width where the canvas is actually visible —
-  // responsive rules commonly hide hero artwork below the `lg` breakpoint.
-  ctx = await browser.newContext({ viewport: VIEWPORTS.pc });
-  page = await ctx.newPage();
-  await page.goto(url, { waitUntil: "load", timeout: 60000 });
-  await page.waitForTimeout(3000);
   const loc = page.locator("canvas").nth(t.index);
   await loc.scrollIntoViewIfNeeded().catch(() => {});
   await page.waitForTimeout(800); // let it paint before the first frame
 
   const b64 = await page.evaluate(`(${CAPTURE})(${t.index}, ${SECONDS * 1000})`);
-  await ctx.close();
 
   if (b64) {
     mkdirSync("public/videos", { recursive: true });
@@ -137,30 +143,20 @@ for (const t of targets.filter((x) => x.animated)) {
     console.error(`    ✓ ${t.output} (${SECONDS}s loop, canvas stream)`);
   } else {
     console.error(`    canvas[${t.index}] could not be stream-captured — falling back to a still PNG`);
-    const ctxF = await browser.newContext({ viewport: VIEWPORTS.pc });
-    const pF = await ctxF.newPage();
-    await pF.goto(url, { waitUntil: "load", timeout: 60000 });
-    await pF.waitForTimeout(3000);
     mkdirSync("public/images", { recursive: true });
     t.output = `public/images/canvas-${t.index}.png`;
-    await pF.locator("canvas").nth(t.index).screenshot({ path: t.output }).catch(() => (t.output = null));
+    await loc.screenshot({ path: t.output }).catch(() => (t.output = null));
     t.embedAs = t.output ? "img" : null;
-    await ctxF.close();
   }
-  // a poster frame keeps the first paint from being blank
-  const ctx2 = await browser.newContext({ viewport: VIEWPORTS.pc });
-  const p2 = await ctx2.newPage();
-  await p2.goto(url, { waitUntil: "load", timeout: 60000 });
-  await p2.waitForTimeout(3000);
-  const l2 = p2.locator("canvas").nth(t.index);
-  await l2.scrollIntoViewIfNeeded().catch(() => {});
+  // A poster frame keeps the first paint from being blank. Any frame of a
+  // looping animation works, so shoot it right here — no fresh page load.
   mkdirSync("public/images", { recursive: true });
   t.poster = `public/images/canvas-${t.index}-poster.png`;
-  await l2.screenshot({ path: t.poster }).catch(() => (t.poster = null));
-  await ctx2.close();
+  await loc.screenshot({ path: t.poster }).catch(() => (t.poster = null));
 }
 
-await browser.close();
+await close();
+await closeBrowser();
 
 writeJson(`docs/research/${hostOf(url)}/canvas.json`, { url, generatedAt: new Date().toISOString(), canvases: inventory });
 

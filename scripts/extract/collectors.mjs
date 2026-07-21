@@ -18,6 +18,10 @@ export async function collectTokens(page) {
     const radii = new Map();
     const shadows = new Map();
     const fontSizes = new Map();
+    // Which animations are actually used on the page, and on how many elements —
+    // read in the same pass as the token counts: getComputedStyle forces a style
+    // resolution per element, so one walk instead of two halves that cost.
+    const animationsInUse = {};
 
     for (const el of els) {
       const cs = getComputedStyle(el);
@@ -27,6 +31,10 @@ export async function collectTokens(page) {
       if (cs.borderRadius !== "0px") count(radii, cs.borderRadius);
       if (cs.boxShadow !== "none") count(shadows, cs.boxShadow);
       if (el.textContent?.trim()) count(fontSizes, `${cs.fontSize}/${cs.fontWeight}/${cs.lineHeight}`);
+      if (cs.animationName && cs.animationName !== "none") {
+        const key = `${cs.animationName} | ${cs.animationDuration} | ${cs.animationTimingFunction} | ${cs.animationIterationCount} | delay ${cs.animationDelay}`;
+        animationsInUse[key] = (animationsInUse[key] || 0) + 1;
+      }
     }
     const top = (map, n = 20) =>
       [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, n).map(([value, uses]) => ({ value, uses }));
@@ -79,16 +87,6 @@ export async function collectTokens(page) {
         walkRules(sheet.cssRules);
       } catch {
         continue; // cross-origin sheet
-      }
-    }
-
-    // Which animations are actually used on the page, and on how many elements
-    const animationsInUse = {};
-    for (const el of els) {
-      const cs = getComputedStyle(el);
-      if (cs.animationName && cs.animationName !== "none") {
-        const key = `${cs.animationName} | ${cs.animationDuration} | ${cs.animationTimingFunction} | ${cs.animationIterationCount} | delay ${cs.animationDelay}`;
-        animationsInUse[key] = (animationsInUse[key] || 0) + 1;
       }
     }
 
