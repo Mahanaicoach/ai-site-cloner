@@ -45,7 +45,11 @@ export function writeJson(path, data) {
 // viewports used to pay the launch three times — now they pay it once.
 // ---------------------------------------------------------------------------
 
-let _browser = null;
+// Memoise the launch *promise*, not the resolved browser. Concurrent callers
+// (forEachViewport opens three contexts at once) would otherwise all observe a
+// null browser and each launch their own Chromium — closeBrowser() then closes
+// only the last one and the orphans keep the Node event loop alive forever.
+let _browserPromise = null;
 
 const CONTEXT_OPTS = {
   userAgent:
@@ -53,18 +57,18 @@ const CONTEXT_OPTS = {
   deviceScaleFactor: 1,
 };
 
-export async function getBrowser() {
-  if (!_browser) _browser = await chromium.launch({ headless: true });
-  return _browser;
+export function getBrowser() {
+  if (!_browserPromise) _browserPromise = chromium.launch({ headless: true });
+  return _browserPromise;
 }
 
 // Every script must call this before exiting — the browser process keeps the
 // Node event loop alive otherwise.
 export async function closeBrowser() {
-  if (_browser) {
-    await _browser.close();
-    _browser = null;
-  }
+  if (!_browserPromise) return;
+  const pending = _browserPromise;
+  _browserPromise = null;
+  await (await pending).close();
 }
 
 // Lazy-loading detection: count IntersectionObservers the page constructs, so
@@ -239,11 +243,24 @@ export async function freezePage(page) {
     content:
       "*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important}",
   });
-  await page.evaluate(() => {
-    document.querySelectorAll("video").forEach((v) => {
-      v.pause();
-      v.currentTime = 0;
-    });
+  // Park videos on a frame that actually has content. Seeking to 0 lands on the
+  // first encoded frame, which for a screen recording is often blank — that
+  // renders as an empty box and costs the section real diff points.
+  await page.evaluate(async () => {
+    const vids = [...document.querySelectorAll("video")];
+    await Promise.all(
+      vids.map(
+        (v) =>
+          new Promise((resolve) => {
+            v.pause();
+            const target = Number.isFinite(v.duration) && v.duration > 1 ? 1 : 0;
+            if (Math.abs(v.currentTime - target) < 0.05) return resolve();
+            v.addEventListener("seeked", () => resolve(), { once: true });
+            v.currentTime = target;
+            setTimeout(resolve, 1000); // don't hang on a video that won't seek
+          })
+      )
+    );
   });
 }
 

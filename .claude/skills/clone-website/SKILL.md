@@ -37,7 +37,7 @@ Ten scripts do the mechanical work — **use them instead of hand-measuring via 
 | `node scripts/extract/crawl.mjs <url> [--max 25]` | Discover pages (sitemap + nav links) → `docs/research/<host>/sitemap.json` |
 | `node scripts/extract/tokens.mjs <url>` | Colors, fonts, :root CSS vars, shadows, global scroll behaviors → `tokens.json` |
 | `node scripts/extract/assets.mjs <url>` | Enumerate + download all images/videos/SVGs/favicons/fonts → `public/`, `assets.json` |
-| `node scripts/extract/section.mjs <url> --selector "css" [--name x] [--state scroll:600\|click:sel\|hover:sel] [--viewport pc\|ipad\|phone]` | Full computed-style DOM walk of one section; `--state` captures a second state and diffs them |
+| `node scripts/extract/section.mjs <url> --selector "css" [--name x] [--state scroll:600\|click:sel\|hover:sel] [--viewport pc\|ipad\|phone]` | Full computed-style DOM walk. **`--selector`/`--name` repeat — pass every section in one call and they all extract from a single page load.** `--state` captures a second state and diffs them (element styles *and* `::before`/`::after`), waiting for the section's real transition duration |
 | `node scripts/extract/screenshot.mjs <url> [--selector css] [--name x]` | Screenshots at phone/iPad/PC → `docs/design-references/<host>/` |
 | `node scripts/extract/responsive.mjs <url> [--selector css]` | Auto-detects sections and measures each one's real layout (actual column counts, hidden elements, font sizes) at all 3 viewports → `responsive.json` |
 | `node scripts/extract/probe.mjs <url> --selector "css" [--selector "css2"] [--props a,b,c]` | Exact computed values for specific selectors at all 3 viewports, as a markdown table with a **varies** column — paste straight into a spec's Responsive section |
@@ -102,15 +102,32 @@ node scripts/manifest.mjs add-section --route / --name hero --selector "section.
 Work through `manifest.mjs next` until no sections remain. For each section:
 
 ### 3a. Extract
+
+**Batch the default-state walk once per page, not once per section.** Every `--selector`
+shares a single page load, so this is one navigation instead of N:
+
 ```bash
-node scripts/extract/screenshot.mjs <page-url> --selector "<sel>" --name <name>          # all 3 viewports
-node scripts/extract/section.mjs <page-url> --selector "<sel>" --name <name>             # computed styles + text (incl. ::before/::after)
+# ONE call covering every section on the page — do this before the per-section loop
+node scripts/extract/section.mjs <page-url> \
+  --selector "<sel-1>" --name <name-1> \
+  --selector "<sel-2>" --name <name-2> \
+  --selector "<sel-3>" --name <name-3>
+```
+
+Then per section:
+```bash
+node scripts/extract/screenshot.mjs <page-url> --selector "<sel>" --name <name>          # all 3 viewports, in parallel
 node scripts/extract/probe.mjs <page-url> --selector "<sel>" --selector "<sel> h2"        # per-viewport table for the Responsive section
 # per discovered behavior — one call per state:
 node scripts/extract/section.mjs <page-url> --selector "<sel>" --name <name>-hover --state hover:".card"
 node scripts/extract/section.mjs <page-url> --selector "<sel>" --name <name>-scrolled --state scroll:600
 # per tab/pill state: --state click:".tab-2" etc. EVERY state, not just the default.
 ```
+State captures wait for the section's actual transition duration, so a slow fade is
+recorded at its end value, not mid-flight — check `settleMs` in the output if a diff
+looks wrong. The `diff` array covers `::before`/`::after` too, which is where hover
+overlays usually live.
+
 Mark: `manifest.mjs set --route <r> --section <name> --stage extracted`
 
 ### 3b. Write the spec — `docs/research/components/<route-slug>/<name>.spec.md`

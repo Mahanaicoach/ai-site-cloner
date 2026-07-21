@@ -9,8 +9,8 @@
 //   animated canvas → a looping .webm recorded from the live page, drop it in
 //                     as <video autoplay loop muted playsinline>
 //
-// The recording isolates the canvas (pins it to a 1:1 viewport, hides
-// everything else) so the file contains the artwork and nothing else.
+// Recording uses canvas.captureStream(), so the file holds the canvas's own
+// pixels only — no page chrome, no page-load frames before the artwork appears.
 //
 // Usage:
 //   node scripts/extract/canvas.mjs <url> [--seconds 6] [--index 0] [--all]
@@ -18,7 +18,7 @@
 //         + docs/research/<host>/canvas.json
 import { chromium } from "playwright";
 import { createHash } from "node:crypto";
-import { mkdirSync, renameSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { VIEWPORTS, hostOf, writeJson, parseArgs } from "../lib.mjs";
 
 const args = parseArgs(process.argv.slice(2));
@@ -28,7 +28,6 @@ if (!url) {
   process.exit(1);
 }
 const SECONDS = Number(args.seconds ?? 6);
-const TMP = "temp/canvas-rec";
 
 // ── 1. Inventory every canvas on the page ─────────────────────────────
 const browser = await chromium.launch();
@@ -89,45 +88,64 @@ for (const t of targets) {
 await ctx.close();
 
 // ── 3. Record the animated ones ───────────────────────────────────────
-// Isolating the canvas keeps the recording free of surrounding page chrome.
-const ISOLATE = `(index) => {
+// Record the canvas's own output stream rather than the viewport. Playwright's
+// recordVideo starts when the context opens, so it always captures the page load
+// and pre-isolation chrome ahead of the artwork; captureStream() yields exactly
+// the canvas pixels, starting exactly when we say.
+const CAPTURE = `async (index, ms) => {
   const c = document.querySelectorAll("canvas")[index];
-  if (!c) return null;
-  const bg = getComputedStyle(document.body).backgroundColor;
-  document.documentElement.style.background = bg;
-  document.body.style.cssText = "margin:0;padding:0;overflow:hidden;background:" + bg;
-  for (const el of document.body.querySelectorAll("*")) {
-    if (el !== c && !el.contains(c)) el.style.visibility = "hidden";
-  }
-  c.style.cssText = "position:fixed;top:0;left:0;width:100vw;height:100vh;visibility:visible;z-index:2147483647";
-  return true;
+  if (!c || typeof c.captureStream !== "function") return null;
+  const stream = c.captureStream(30);
+  const types = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"];
+  const mimeType = types.find((t) => MediaRecorder.isTypeSupported(t));
+  if (!mimeType) return null;
+  const rec = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 4_000_000 });
+  const chunks = [];
+  rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+  const stopped = new Promise((r) => { rec.onstop = r; });
+  rec.start();
+  await new Promise((r) => setTimeout(r, ms));
+  rec.stop();
+  await stopped;
+  const bytes = new Uint8Array(await new Blob(chunks, { type: "video/webm" }).arrayBuffer());
+  let bin = "";
+  const CH = 0x8000;
+  for (let i = 0; i < bytes.length; i += CH) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
+  return btoa(bin);
 }`;
 
 for (const t of targets.filter((x) => x.animated)) {
-  rmSync(TMP, { recursive: true, force: true });
-  mkdirSync(TMP, { recursive: true });
-  const size = { width: t.cssWidth || 700, height: t.cssHeight || 700 };
-  ctx = await browser.newContext({ viewport: size, recordVideo: { dir: TMP, size } });
+  // The page must render at a width where the canvas is actually visible —
+  // responsive rules commonly hide hero artwork below the `lg` breakpoint.
+  ctx = await browser.newContext({ viewport: VIEWPORTS.pc });
   page = await ctx.newPage();
   await page.goto(url, { waitUntil: "load", timeout: 60000 });
   await page.waitForTimeout(3000);
-  const ok = await page.evaluate(`(${ISOLATE})(${t.index})`);
-  if (!ok) {
-    console.error(`    canvas[${t.index}] vanished before recording — skipped`);
-    await ctx.close();
-    continue;
-  }
-  await page.waitForTimeout(SECONDS * 1000);
-  await ctx.close(); // finalizes the video file
+  const loc = page.locator("canvas").nth(t.index);
+  await loc.scrollIntoViewIfNeeded().catch(() => {});
+  await page.waitForTimeout(800); // let it paint before the first frame
 
-  const file = readdirSync(TMP).find((f) => f.endsWith(".webm"));
-  if (file) {
+  const b64 = await page.evaluate(`(${CAPTURE})(${t.index}, ${SECONDS * 1000})`);
+  await ctx.close();
+
+  if (b64) {
     mkdirSync("public/videos", { recursive: true });
     t.output = `public/videos/canvas-${t.index}.webm`;
-    renameSync(`${TMP}/${file}`, t.output);
+    writeFileSync(t.output, Buffer.from(b64, "base64"));
     t.embedAs = "video";
     t.recordedSeconds = SECONDS;
-    console.error(`    ✓ ${t.output} (${SECONDS}s loop)`);
+    console.error(`    ✓ ${t.output} (${SECONDS}s loop, canvas stream)`);
+  } else {
+    console.error(`    canvas[${t.index}] could not be stream-captured — falling back to a still PNG`);
+    const ctxF = await browser.newContext({ viewport: VIEWPORTS.pc });
+    const pF = await ctxF.newPage();
+    await pF.goto(url, { waitUntil: "load", timeout: 60000 });
+    await pF.waitForTimeout(3000);
+    mkdirSync("public/images", { recursive: true });
+    t.output = `public/images/canvas-${t.index}.png`;
+    await pF.locator("canvas").nth(t.index).screenshot({ path: t.output }).catch(() => (t.output = null));
+    t.embedAs = t.output ? "img" : null;
+    await ctxF.close();
   }
   // a poster frame keeps the first paint from being blank
   const ctx2 = await browser.newContext({ viewport: VIEWPORTS.pc });
@@ -142,7 +160,6 @@ for (const t of targets.filter((x) => x.animated)) {
   await ctx2.close();
 }
 
-rmSync(TMP, { recursive: true, force: true });
 await browser.close();
 
 writeJson(`docs/research/${hostOf(url)}/canvas.json`, { url, generatedAt: new Date().toISOString(), canvases: inventory });

@@ -61,6 +61,22 @@ const found = await page.evaluate(() => {
       height: s.getAttribute("height") || s.getBoundingClientRect().height,
       context: (s.closest("a,button")?.textContent || s.parentElement?.className || "").toString().trim().slice(0, 60),
     })),
+    // Rasters referenced from inside inline SVG (<image href>, <pattern><image>).
+    // These are invisible to an <img> scan, yet sites use them for full-size
+    // screenshots — miss one and a whole section renders empty.
+    svgImages: [...document.querySelectorAll("image")]
+      .map((im) => {
+        const href = im.getAttribute("href") || im.getAttribute("xlink:href");
+        if (!href || href.startsWith("data:")) return null;
+        const r = im.getBoundingClientRect();
+        return {
+          url: new URL(href, location.href).href,
+          renderedWidth: Math.round(r.width),
+          renderedHeight: Math.round(r.height),
+          insidePattern: !!im.closest("pattern"),
+        };
+      })
+      .filter(Boolean),
     seo: {
       favicons: [...document.querySelectorAll('link[rel*="icon"]')].map((l) => ({ href: l.href, sizes: l.sizes?.toString() || "" })),
       ogImage: document.querySelector('meta[property="og:image"]')?.content || null,
@@ -133,6 +149,7 @@ if (doDownload) {
   const jobs = [
     ...found.images.map((i) => ({ url: i.src, kind: "image" })),
     ...found.backgroundImages.map((b) => ({ url: b.url, kind: "image" })),
+    ...found.svgImages.map((b) => ({ url: b.url, kind: "image" })),
     ...found.videos.flatMap((v) => [v.src && { url: v.src, kind: "video" }, v.poster && { url: v.poster, kind: "image" }].filter(Boolean)),
     ...found.seo.favicons.map((f) => ({ url: f.href, kind: "seo" })),
     ...(found.seo.ogImage ? [{ url: found.seo.ogImage, kind: "seo" }] : []),
@@ -148,6 +165,7 @@ if (doDownload) {
 const localFor = (remote) => manifest.find((m) => m.remote === remote)?.local || null;
 found.images.forEach((i) => (i.local = localFor(i.src)));
 found.backgroundImages.forEach((b) => (b.local = localFor(b.url)));
+found.svgImages.forEach((b) => (b.local = localFor(b.url)));
 found.videos.forEach((v) => {
   v.local = localFor(v.src);
   v.posterLocal = localFor(v.poster);
@@ -162,7 +180,7 @@ writeJson(`docs/research/${host}/assets.json`, {
 const okCount = manifest.filter((m) => m.ok).length;
 const failCount = manifest.filter((m) => !m.ok).length;
 console.log(
-  `Images: ${found.images.length} · BG images: ${found.backgroundImages.length} · Videos: ${found.videos.length} · SVGs: ${found.inlineSvgs.length} · Fonts: ${found.fonts.length}` +
+  `Images: ${found.images.length} · BG images: ${found.backgroundImages.length} · SVG rasters: ${found.svgImages.length} · Videos: ${found.videos.length} · SVGs: ${found.inlineSvgs.length} · Fonts: ${found.fonts.length}` +
     (doDownload ? ` · Downloaded: ${okCount} ok, ${failCount} failed` : " · (download skipped)")
 );
 if (failCount > 0) console.log("Failed downloads listed in assets.json — retry or fetch manually.");
