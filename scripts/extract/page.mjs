@@ -30,6 +30,7 @@ import {
   gotoAndSettle,
   autoScroll,
   freezePage,
+  shootSectionsFromFullPage,
   hostOf,
   writeJson,
   parseArgs,
@@ -163,17 +164,16 @@ if (doShots) {
   jobs.push(
     ...Object.entries(loaded).map(async ([vp, { page }]) => {
       await freezePage(page); // deterministic pixels — safe now, measuring is done
-      await page.screenshot({ path: `${shotDir}/${pageSlug}-${vp}.png`, fullPage: true });
       if (doSectionShots) {
-        for (const s of sections) {
-          const loc = page.locator(s.selector).first();
-          try {
-            await loc.scrollIntoViewIfNeeded({ timeout: 3000 });
-            await loc.screenshot({ path: `${shotDir}/${s.name}-${vp}.png`, timeout: 5000 });
-          } catch {
-            console.error(`  ! section shot failed: ${s.name} @ ${vp}`);
-          }
-        }
+        // One full-page capture yields the page shot AND every section crop —
+        // no per-section scroll+shoot chain.
+        const { failed } = await shootSectionsFromFullPage(page, sections, {
+          fullPagePath: `${shotDir}/${pageSlug}-${vp}.png`,
+          pathFor: (s) => `${shotDir}/${s.name}-${vp}.png`,
+        });
+        for (const name of failed) console.error(`  ! section shot failed: ${name} @ ${vp}`);
+      } else {
+        await page.screenshot({ path: `${shotDir}/${pageSlug}-${vp}.png`, fullPage: true });
       }
       console.error(`  ✓ screenshots @ ${vp}`);
     })

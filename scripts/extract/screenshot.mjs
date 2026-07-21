@@ -16,6 +16,7 @@ import {
   gotoAndSettle,
   autoScroll,
   freezePage,
+  shootSectionsFromFullPage,
   hostOf,
   slugify,
   parseArgs,
@@ -48,19 +49,14 @@ await forEachViewport(wanted, async (page, vp) => {
     console.log(`  ✓ ${path}`);
     return;
   }
-  for (const { selector, name } of shots) {
-    const path = `${outDir}/${name}-${vp}.png`;
-    try {
-      const loc = page.locator(selector).first();
-      // Short timeouts: a bad selector should cost 3s and a warning, not
-      // Playwright's default 30s before the rest of the sections get shot.
-      await loc.scrollIntoViewIfNeeded({ timeout: 3000 });
-      await loc.screenshot({ path, timeout: 5000 });
-      console.log(`  ✓ ${path}`);
-    } catch (err) {
-      // One bad selector must not kill the other sections' shots.
-      console.warn(`  ⚠ ${vp}: selector "${selector}" failed — ${String(err.message || err).split("\n")[0]}`);
-    }
+  // One full-page capture, every section cropped from it — no per-section
+  // scroll+shoot chain, and one bad selector can't slow down the others.
+  const { failed } = await shootSectionsFromFullPage(page, shots, {
+    pathFor: (s) => `${outDir}/${s.name}-${vp}.png`,
+  });
+  for (const { name } of shots) {
+    if (failed.includes(name)) console.warn(`  ⚠ ${vp}: section "${name}" failed`);
+    else console.log(`  ✓ ${outDir}/${name}-${vp}.png`);
   }
 });
 
