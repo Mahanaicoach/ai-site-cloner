@@ -64,6 +64,33 @@ const WALKER = `(function (selector, maxDepth) {
       .join(" ")
       .slice(0, 500) || null;
   }
+  // ::before / ::after carry real visuals (underline bars, icon glyphs, overlays)
+  // that getComputedStyle on the element itself never reveals. Miss these and the
+  // clone silently loses decorations.
+  const PSEUDO_PROPS = [
+    "content","width","height","backgroundColor","backgroundImage","backgroundSize","borderRadius",
+    "position","top","right","bottom","left","transform","opacity","display",
+    "borderBottomWidth","borderTopWidth","borderLeftWidth","borderRightWidth","borderColor","borderStyle",
+    "margin","padding","zIndex","boxShadow","transition","mixBlendMode","filter",
+  ];
+  // Typography only matters when the pseudo actually renders text (icon fonts, glyphs)
+  const PSEUDO_TEXT_PROPS = ["fontFamily","fontSize","fontWeight","color","lineHeight","letterSpacing","textAlign"];
+  function pseudos(element) {
+    const out = {};
+    for (const pe of ["::before", "::after"]) {
+      const cs = getComputedStyle(element, pe);
+      if (!cs.content || cs.content === "none") continue;
+      const hasText = cs.content !== '""' && cs.content !== "''" && !cs.content.startsWith("url(");
+      const styles = { content: cs.content };
+      for (const p of [...PSEUDO_PROPS, ...(hasText ? PSEUDO_TEXT_PROPS : [])]) {
+        const v = cs[p];
+        if (v !== undefined && !SKIP.has(v)) styles[p] = v;
+      }
+      // A pseudo with no box and no text renders nothing — skip it
+      if (Object.keys(styles).length > 1) out[pe] = styles;
+    }
+    return Object.keys(out).length ? out : undefined;
+  }
   function walk(element, d) {
     if (d > maxDepth) return { truncated: true, tag: element.tagName.toLowerCase() };
     const kids = [...element.children];
@@ -80,6 +107,7 @@ const WALKER = `(function (selector, maxDepth) {
       isSvg: element.tagName.toLowerCase() === "svg" || undefined,
       rect: { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) },
       styles: styles(element),
+      pseudo: pseudos(element),
       childCount: kids.length,
       children: kids.slice(0, 25).map((c) => walk(c, d + 1)),
     };
