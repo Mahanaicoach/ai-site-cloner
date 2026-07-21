@@ -30,18 +30,17 @@ User-provided instructions override these defaults.
 
 ## Tooling
 
-Ten scripts do the mechanical work — **use them instead of hand-measuring via browser MCP**:
+The scripts do the mechanical work — **use them instead of hand-measuring via browser MCP**:
 
 | Script | Purpose |
 |---|---|
+| **`node scripts/extract/page.mjs <url> [--no-site-files]`** | **THE WORKHORSE — one call, 3 page loads total.** Auto-detects sections, then produces `tokens.json` + `css.json` (skip on later pages with `--no-site-files`), `assets.json` + downloads to `public/`, `responsive.json` (all 3 viewports), a full computed-style walk per section (`sections/<name>.json`), and full-page **and** per-section screenshots at phone/iPad/PC. Accepts explicit `--selector "css" --name x` pairs to override detection. Everything is measured from the SAME page state, so numbers, walks and screenshots can never disagree |
 | `node scripts/extract/crawl.mjs <url> [--max 25]` | Discover pages (sitemap + nav links) → `docs/research/<host>/sitemap.json` |
-| `node scripts/extract/tokens.mjs <url>` | Colors, fonts, :root CSS vars, shadows, global scroll behaviors → `tokens.json` |
-| `node scripts/extract/assets.mjs <url>` | Enumerate + download all images/videos/SVGs/favicons/fonts → `public/`, `assets.json` |
-| `node scripts/extract/section.mjs <url> --selector "css" [--name x] [--state scroll:600\|click:sel\|hover:sel] [--viewport pc\|ipad\|phone]` | Full computed-style DOM walk. **`--selector`/`--name` repeat — pass every section in one call and they all extract from a single page load.** `--state` captures a second state and diffs them (element styles *and* `::before`/`::after`), waiting for the section's real transition duration |
-| `node scripts/extract/screenshot.mjs <url> [--selector css] [--name x]` | Screenshots at phone/iPad/PC → `docs/design-references/<host>/` |
-| `node scripts/extract/responsive.mjs <url> [--selector css]` | Auto-detects sections and measures each one's real layout (actual column counts, hidden elements, font sizes) at all 3 viewports → `responsive.json` |
+| `node scripts/extract/section.mjs <url> --selector "css" [--name x] --state scroll:600\|click:sel\|hover:sel [--viewport pc\|ipad\|phone]` | **State captures** (page.mjs covers the default state). Captures a second state and diffs them (element styles *and* `::before`/`::after`), waiting for the section's real transition duration. `--selector`/`--name` repeat — one page load for all |
 | `node scripts/extract/probe.mjs <url> --selector "css" [--selector "css2"] [--props a,b,c]` | Exact computed values for specific selectors at all 3 viewports, as a markdown table with a **varies** column — paste straight into a spec's Responsive section |
-| `node scripts/diff.mjs --original <url> --clone <url> [--selector css] [--viewport pc] [--threshold 95]` | Scored pixel diff, original vs clone |
+| `node scripts/extract/screenshot.mjs <url> [--selector css --name x ...]` | Extra screenshots at phone/iPad/PC (page.mjs already shot everything once). `--selector`/`--name` repeat — one call, 3 loads, N sections |
+| `node scripts/extract/tokens.mjs` / `css.mjs` / `assets.mjs` / `responsive.mjs` | Single-purpose re-runs of one page.mjs output when something needs refreshing |
+| `node scripts/diff.mjs --original <url> --clone <url> [--selector css] --viewport all [--threshold 95]` | Scored pixel diff, original vs clone. **`--viewport all` scores pc+ipad+phone in one call**, and the per-viewport **band breakdown names the y-range where the mismatch lives** — read it before guessing at causes |
 | `node scripts/lint-spec.mjs <spec.md\|dir>` | Mechanical spec-completeness gate — must pass before ANY builder dispatch |
 | `node scripts/manifest.mjs <cmd>` | Pipeline state: init / add-page / add-section / set / status / next |
 
@@ -73,15 +72,13 @@ Browser MCP (Chrome MCP, Playwright MCP — if available) is for **judgment work
    node scripts/manifest.mjs add-page --url <url> --route /        # per confirmed page
    ```
 
-## Phase 1 — Recon (per site, then per page)
+## Phase 1 — Recon (one page.mjs call per page)
 
-**Site-wide (once):**
-1. `tokens.mjs` on the start page → read `tokens.json`
-2. `assets.mjs` on every confirmed page (it dedupes downloads across pages)
-3. `screenshot.mjs` full-page on every confirmed page — these are the master references
-4. `responsive.mjs` on every confirmed page → real layout changes per section
-5. **Interaction sweep** (judgment work — browser MCP if available): scroll each page slowly top to bottom. Does the header change? Do elements animate in? Auto-switching tabs? Scroll-snap? Smooth-scroll lib (`tokens.json` flags `.lenis`/Locomotive)? Then click every tab/pill/accordion and note what changes. Then hover. Record findings in `docs/research/<host>/BEHAVIORS.md`.
-6. **Shared chrome detection:** compare screenshots across pages — header/nav/footer that repeat become SHARED components (`SiteHeader`, `SiteFooter`), extracted once from the page where they're most complete.
+1. **First page:** `node scripts/extract/page.mjs <start-url>` — produces tokens, css, assets+downloads, responsive signatures, per-section walks, and every screenshot in one shot (3 page loads).
+2. **Every other confirmed page:** `node scripts/extract/page.mjs <url> --no-site-files` (tokens/css are site-wide; everything else is per-page). Downloads dedupe across pages automatically — files already in `public/` are skipped.
+3. **Review the detected sections** in each run's stdout summary (name, selector, pc height, headline responsive change). Detection is a heuristic: if a "section" is really two, or two are really one, re-run with explicit `--selector "css" --name x` pairs. Section names become spec/component names — rename `section-3` style fallbacks to something meaningful via `--name`.
+4. **Interaction sweep** (judgment work — browser MCP if available): scroll each page slowly top to bottom. Does the header change? Do elements animate in? Auto-switching tabs? Scroll-snap? Smooth-scroll lib (`tokens.json` flags `.lenis`/Locomotive)? Then click every tab/pill/accordion and note what changes. Then hover. `css.json`'s `interactiveStates` lists every :hover/:focus rule the stylesheet defines — use it as the checklist of what to probe. Record findings in `docs/research/<host>/BEHAVIORS.md`.
+5. **Shared chrome detection:** compare screenshots across pages — header/nav/footer that repeat become SHARED components (`SiteHeader`, `SiteFooter`), extracted once from the page where they're most complete.
 
 **Per page — topology:** map every distinct section top to bottom with a working name, its selector, its interaction model (static / click-driven / scroll-driven / hover-driven / time-driven / mixed), and layer notes (sticky? overlay? z-index?). Save `docs/research/<host>/PAGE_TOPOLOGY.md`, then register each section:
 ```bash
@@ -103,22 +100,14 @@ Work through `manifest.mjs next` until no sections remain. For each section:
 
 ### 3a. Extract
 
-**Batch the default-state walk once per page, not once per section.** Every `--selector`
-shares a single page load, so this is one navigation instead of N:
+**The default state is already extracted** — Phase 1's page.mjs run wrote
+`sections/<name>.json`, `responsive.json`, and all screenshots. Per section, only two
+things remain:
 
 ```bash
-# ONE call covering every section on the page — do this before the per-section loop
-node scripts/extract/section.mjs <page-url> \
-  --selector "<sel-1>" --name <name-1> \
-  --selector "<sel-2>" --name <name-2> \
-  --selector "<sel-3>" --name <name-3>
-```
-
-Then per section:
-```bash
-node scripts/extract/screenshot.mjs <page-url> --selector "<sel>" --name <name>          # all 3 viewports, in parallel
-node scripts/extract/probe.mjs <page-url> --selector "<sel>" --selector "<sel> h2"        # per-viewport table for the Responsive section
-# per discovered behavior — one call per state:
+# 1. Per-viewport probe table for the spec's Responsive section (batch several selectors)
+node scripts/extract/probe.mjs <page-url> --selector "<sel>" --selector "<sel> h2"
+# 2. Per discovered behavior — one call per state (batch selectors sharing a trigger):
 node scripts/extract/section.mjs <page-url> --selector "<sel>" --name <name>-hover --state hover:".card"
 node scripts/extract/section.mjs <page-url> --selector "<sel>" --name <name>-scrolled --state scroll:600
 # per tab/pill state: --state click:".tab-2" etc. EVERY state, not just the default.
@@ -126,7 +115,9 @@ node scripts/extract/section.mjs <page-url> --selector "<sel>" --name <name>-scr
 State captures wait for the section's actual transition duration, so a slow fade is
 recorded at its end value, not mid-flight — check `settleMs` in the output if a diff
 looks wrong. The `diff` array covers `::before`/`::after` too, which is where hover
-overlays usually live.
+overlays usually live. Cross-check discovered behaviors against `css.json`'s
+`interactiveStates` — a :hover rule in the stylesheet with no captured state means
+the extraction is not done.
 
 Mark: `manifest.mjs set --route <r> --section <name> --stage extracted`
 
@@ -196,15 +187,15 @@ Per page: create `src/app/<route>/page.tsx` importing its section components wit
 
 ## Phase 5 — Scored QA Loop
 
-Start the clone: `npm run dev` (background). Then for **every section × every viewport**:
+Start the clone: `npm run dev` (background). Then **one call per section scores all three viewports**:
 
 ```bash
-node scripts/diff.mjs --original <orig-page-url> --clone http://localhost:3000<route> --selector "<sel>" --viewport pc   # then ipad, then phone
-node scripts/manifest.mjs set --route <r> --section <name> --score pc=<match>
+node scripts/diff.mjs --original <orig-page-url> --clone http://localhost:3000<route> --selector "<sel>" --viewport all --name <name>
+node scripts/manifest.mjs set --route <r> --section <name> --score pc=<match>   # per viewport
 ```
 
 - **Pass = ≥95% on all three viewports** → `--stage qa_passed`
-- Below 95% → open the diff image in `docs/research/qa/`, find the discrepancy, check the spec (wrong extraction → re-extract and fix; right spec, wrong build → fix component), re-diff
+- Below 95% → **read the band breakdown first**: it names the y-range where the mismatch lives, so you inspect that band of the diff image in `docs/research/qa/` instead of eyeballing the whole section. Then check the spec (wrong extraction → re-extract and fix; right spec, wrong build → fix component), re-diff
 - A large height mismatch reported by diff.mjs = missing content or wrong spacing — fix before pixel-tweaking
 - Max 3 fix iterations per section, then record the gap honestly and move on
 - **Text-heavy sections at phone width often plateau at 90–95%** when the target's font isn't available on Google Fonts (e.g. Source Sans Pro → Source Sans 3). Different metrics = different wrap points = unavoidable pixel drift. Confirm the layout matches, note the substitution, and accept it.

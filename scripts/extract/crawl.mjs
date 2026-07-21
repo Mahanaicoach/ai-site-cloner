@@ -13,7 +13,7 @@ if (!startUrl) {
 const MAX = Number(args.max ?? 25);
 const origin = new URL(startUrl).origin;
 
-// 1. Try sitemap.xml (no browser needed)
+// 1. Try sitemap.xml (no browser needed) — runs concurrently with the page load below
 // Same-site check that tolerates www./non-www mismatches (very common)
 const sameSite = (a, b) => {
   try {
@@ -23,57 +23,66 @@ const sameSite = (a, b) => {
   }
 };
 
-const fromSitemap = new Set();
-try {
-  const res = await fetch(`${origin}/sitemap.xml`, { signal: AbortSignal.timeout(10000) });
-  if (res.ok) {
-    const xml = await res.text();
-    let locs = [...xml.matchAll(/<loc>\s*([^<]+?)\s*<\/loc>/g)].map((m) => m[1].trim());
-    // sitemap index → fetch child sitemaps (first 5)
+const fetchLocs = async (u) => {
+  const res = await fetch(u, { signal: AbortSignal.timeout(10000) });
+  if (!res.ok) return [];
+  return [...(await res.text()).matchAll(/<loc>\s*([^<]+?)\s*<\/loc>/g)].map((m) => m[1].trim());
+};
+
+const collectSitemap = async () => {
+  const fromSitemap = new Set();
+  try {
+    const locs = await fetchLocs(`${origin}/sitemap.xml`);
+    // sitemap index → fetch child sitemaps (first 5) in parallel
     const children = locs.filter((u) => u.endsWith(".xml")).slice(0, 5);
-    for (const child of children) {
-      try {
-        const r = await fetch(child, { signal: AbortSignal.timeout(10000) });
-        if (r.ok) locs.push(...[...(await r.text()).matchAll(/<loc>\s*([^<]+?)\s*<\/loc>/g)].map((m) => m[1].trim()));
-      } catch { /* skip broken child sitemap */ }
-    }
+    const childLocs = await Promise.all(
+      children.map((child) => fetchLocs(child).catch(() => [] /* skip broken child sitemap */))
+    );
+    locs.push(...childLocs.flat());
     for (const u of locs) {
       if (sameSite(u, origin) && !u.endsWith(".xml")) fromSitemap.add(u);
     }
+  } catch {
+    // no sitemap — fine, nav links below are the primary source
   }
-} catch {
-  // no sitemap — fine, nav links below are the primary source
-}
+  return fromSitemap;
+};
 
 // 2. Collect same-origin links from the rendered start page
-const { browser, page } = await launchPage();
-await gotoAndSettle(page, startUrl);
-const links = await page.evaluate(() => {
-  const inNav = (el) => !!el.closest("header, nav, footer");
-  const host = location.hostname.replace(/^www\./, "");
-  const seen = new Map();
-  for (const a of document.querySelectorAll("a[href]")) {
-    const href = a.href.split("#")[0].split("?")[0];
-    let linkHost;
-    try {
-      linkHost = new URL(href).hostname.replace(/^www\./, "");
-    } catch {
-      continue;
+const collectLinks = async () => {
+  const { browser, page } = await launchPage();
+  await gotoAndSettle(page, startUrl);
+  const links = await page.evaluate(() => {
+    const inNav = (el) => !!el.closest("header, nav, footer");
+    const host = location.hostname.replace(/^www\./, "");
+    const seen = new Map();
+    for (const a of document.querySelectorAll("a[href]")) {
+      const href = a.href.split("#")[0].split("?")[0];
+      let linkHost;
+      try {
+        linkHost = new URL(href).hostname.replace(/^www\./, "");
+      } catch {
+        continue;
+      }
+      if (linkHost !== host) continue;
+      if (/\.(pdf|zip|jpg|jpeg|png|webp|svg|mp4|xml|ico)$/i.test(href)) continue;
+      const prev = seen.get(href);
+      const entry = {
+        url: href,
+        text: (a.textContent || "").trim().slice(0, 60),
+        source: inNav(a) ? "nav" : "body",
+      };
+      // nav placement wins over body placement
+      if (!prev || (prev.source === "body" && entry.source === "nav")) seen.set(href, entry);
     }
-    if (linkHost !== host) continue;
-    if (/\.(pdf|zip|jpg|jpeg|png|webp|svg|mp4|xml|ico)$/i.test(href)) continue;
-    const prev = seen.get(href);
-    const entry = {
-      url: href,
-      text: (a.textContent || "").trim().slice(0, 60),
-      source: inNav(a) ? "nav" : "body",
-    };
-    // nav placement wins over body placement
-    if (!prev || (prev.source === "body" && entry.source === "nav")) seen.set(href, entry);
-  }
-  return [...seen.values()];
-});
-await browser.close();
+    return [...seen.values()];
+  });
+  await browser.close();
+  return links;
+};
+
+// Sitemap fetches and the browser page load are independent — overlap them.
+const [fromSitemap, links] = await Promise.all([collectSitemap(), collectLinks()]);
 
 // 3. Merge: start page first, then nav links, then sitemap-only, then body links
 const merged = new Map();

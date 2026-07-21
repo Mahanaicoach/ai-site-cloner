@@ -43,6 +43,7 @@ next-env.d.ts
 
 # Local temp files
 temp/
+*.tmp.mjs
 
 # Playwright
 .playwright/

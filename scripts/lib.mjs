@@ -55,7 +55,56 @@ const CONTEXT_OPTS = {
   userAgent:
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
   deviceScaleFactor: 1,
+  // Service workers serve stale shells and bypass request interception — both
+  // poison extraction determinism and the response cache below.
+  serviceWorkers: "block",
 };
+
+// ---------------------------------------------------------------------------
+// In-process response cache
+//
+// Every context has an isolated HTTP cache, so a 3-viewport run downloads every
+// image, font and script three times — and page.mjs loads the same page many
+// more. Cache static subresources once per process and replay them. GET-only,
+// static resource types only (documents and XHR always hit the network).
+// ---------------------------------------------------------------------------
+const CACHEABLE = new Set(["image", "font", "stylesheet", "script"]);
+const MAX_ENTRY = 4 * 1024 * 1024; // 4 MB per resource
+const MAX_TOTAL = 256 * 1024 * 1024; // 256 MB overall
+const _cache = new Map(); // url -> { body: Buffer, contentType: string }
+let _cacheBytes = 0;
+
+async function enableResponseCache(context) {
+  await context.route("**/*", async (route) => {
+    const req = route.request();
+    if (req.method() !== "GET" || !CACHEABLE.has(req.resourceType())) {
+      return route.fallback();
+    }
+    const url = req.url();
+    const hit = _cache.get(url);
+    if (hit) {
+      return route.fulfill({ status: 200, contentType: hit.contentType, body: hit.body });
+    }
+    let res;
+    try {
+      res = await route.fetch();
+    } catch {
+      return route.fallback(); // fetch aborted (navigation) — let the browser handle it
+    }
+    if (res.status() === 200) {
+      try {
+        const body = await res.body();
+        if (body.length <= MAX_ENTRY && _cacheBytes + body.length <= MAX_TOTAL) {
+          _cache.set(url, { body, contentType: res.headers()["content-type"] || "" });
+          _cacheBytes += body.length;
+        }
+      } catch {
+        /* body unavailable — just pass the response through */
+      }
+    }
+    return route.fulfill({ response: res });
+  });
+}
 
 export function getBrowser() {
   if (!_browserPromise) _browserPromise = chromium.launch({ headless: true });
@@ -89,10 +138,12 @@ async function instrumentLazySignals(context) {
 }
 
 // Open a page on the shared browser. `close()` disposes only this context.
-export async function openPage(viewport = VIEWPORTS.pc) {
+// `cache: false` opts out of response caching (e.g. when probing live-changing pages).
+export async function openPage(viewport = VIEWPORTS.pc, { cache = true } = {}) {
   const browser = await getBrowser();
   const context = await browser.newContext({ viewport, ...CONTEXT_OPTS });
   await instrumentLazySignals(context);
+  if (cache) await enableResponseCache(context);
   const page = await context.newPage();
   return { page, context, close: () => context.close() };
 }
@@ -164,12 +215,38 @@ export async function settleLayout(page, { timeout = 3000, quietMs = 150 } = {})
     .catch(() => {});
 }
 
+// Wait until every <img> currently in the DOM has finished loading (or errored).
+// This is the signal networkidle was standing in for on image-heavy pages, and
+// unlike networkidle it can't be held hostage by analytics beacons.
+async function imagesSettled(page, { timeout = 4000 } = {}) {
+  await page
+    .evaluate(
+      (timeout) =>
+        Promise.race([
+          Promise.all(
+            [...document.images]
+              .filter((img) => !img.complete)
+              .map((img) => new Promise((r) => {
+                img.addEventListener("load", r, { once: true });
+                img.addEventListener("error", r, { once: true });
+              }))
+          ),
+          new Promise((r) => setTimeout(r, timeout)),
+        ]),
+      timeout
+    )
+    .catch(() => {});
+}
+
 export async function gotoAndSettle(page, url) {
   await page.goto(url, { waitUntil: "load", timeout: 60000 });
-  // Network quiet + fonts ready + stable height are the three things the old
-  // blanket 1500ms was guessing at. On a fast page this returns almost instantly.
-  await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
+  // Four precise signals instead of one long networkidle gamble. Sites with
+  // analytics/websocket chatter never reach networkidle and used to pay the
+  // full 15s on EVERY load — the cap is now 4s and the other three signals
+  // (fonts ready, images decoded, stable height) carry the real guarantee.
+  await page.waitForLoadState("networkidle", { timeout: 4000 }).catch(() => {});
   await page.evaluate(() => document.fonts?.ready).catch(() => {});
+  await imagesSettled(page);
   await settleLayout(page);
 }
 
@@ -237,12 +314,25 @@ export async function transitionMs(page, selector, { min = 150, max = 4000 } = {
   return Math.min(max, Math.max(min, Math.round(ms)));
 }
 
-// Kill animations/transitions/videos so screenshots are deterministic (for QA diffs).
+// Park animations/transitions/videos so screenshots are deterministic (for QA diffs).
+// Animations jump to their END state, not `animation: none`: killing them outright
+// reverts `fill-mode: forwards` entry animations to their pre-animation frame, so
+// scroll-revealed content screenshots at opacity 0 and QA penalizes a clone that
+// is actually correct. A near-zero duration with iteration-count 1 lands every
+// animation (including infinite spinners) on its final keyframe deterministically.
 export async function freezePage(page) {
   await page.addStyleTag({
     content:
-      "*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important}",
+      "*,*::before,*::after{" +
+      "animation-delay:-0.0001s!important;animation-duration:0.0001s!important;" +
+      "animation-iteration-count:1!important;" +
+      "transition-delay:0s!important;transition-duration:0s!important;" +
+      "caret-color:transparent!important;scroll-behavior:auto!important}",
   });
+  // Two frames so the jumped-to-end animation states actually paint.
+  await page
+    .evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
+    .catch(() => {});
   // Park videos on a frame that actually has content. Seeking to 0 lands on the
   // first encoded frame, which for a screen recording is often blank — that
   // renders as an empty box and costs the section real diff points.
