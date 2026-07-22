@@ -12,10 +12,10 @@ You are a **foreman walking the job site**: scripts do the measuring, you do the
 ## Resume Check (ALWAYS FIRST)
 
 ```bash
-node scripts/manifest.mjs status
+node scripts/manifest.mjs resume
 ```
 
-If a manifest exists, this is a **resumed run**: skip everything already done (`node scripts/manifest.mjs next` tells you where to continue). If not, this is a fresh run — start at Phase 0.
+If a manifest exists, this is a **resumed run**: the digest shows every section's stage AND the exact next commands with real file paths — run them instead of re-deriving where you were. If not, this is a fresh run — start at Phase 0. (`status` prints just the table, `next` the single next section.)
 
 ## Scope Defaults
 
@@ -42,7 +42,7 @@ The scripts do the mechanical work — **use them instead of hand-measuring via 
 | `node scripts/diff.mjs --original <url> --clone <url> [--selector css] --viewport all [--threshold 95]` | Scored pixel diff, original vs clone. **`--viewport all` scores pc+ipad+phone in one call**, and the per-viewport **band breakdown names the y-range where the mismatch lives** — read it before guessing at causes. **Batched sweep: `--route </r>` (or repeated `--section name=css`) scores every section of a page from ONE load per side per viewport.** Original-side shots are cached 24h, so fix-iteration re-diffs only re-render the clone (`--fresh-original` to override) |
 | **`node scripts/spec-scaffold.mjs --route <r> --section <name>`** (or `--all`) | **Generates the mechanical spec sections** (frontmatter, DOM, computed styles, assets, text, responsive) straight from the extraction JSON into `docs/research/components/<route-slug>/<name>.spec.md`, leaving `<!-- AGENT: fill -->` blocks for the judgment parts. Never transcribe JSON values by hand |
 | `node scripts/lint-spec.mjs <spec.md\|dir>` | Mechanical spec-completeness gate — must pass before ANY builder dispatch |
-| `node scripts/manifest.mjs <cmd>` | Pipeline state: init / add-page / add-section / set / status / next |
+| `node scripts/manifest.mjs <cmd>` | Pipeline state: init / add-page / add-section / set / status / next / **resume** (one-screen digest: stage table + exact next commands and file paths) |
 
 **Screenshots come in two sizes.** Every screenshot the scripts produce gets a 640px-wide `-review.png` twin (when the full-res is wider). **Open the `-review.png` for judgment work** — reviewing sections, comparing pages, inspecting failing diff bands; it's visually sufficient at half the cost. Full-res files are for pixelmatch and for builder-agent prompts only.
 

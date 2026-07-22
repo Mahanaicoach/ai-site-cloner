@@ -13,7 +13,9 @@
 //   node scripts/manifest.mjs set --route / --section hero --score pc=96.2
 //   node scripts/manifest.mjs status
 //   node scripts/manifest.mjs next
-import { existsSync, rmSync } from "node:fs";
+//   node scripts/manifest.mjs resume   # one-screen digest: stage table + the
+//                                      # exact next commands and file paths
+import { existsSync, rmSync, readFileSync } from "node:fs";
 import { parseArgs, CACHE_DIR } from "./lib.mjs";
 import { MANIFEST_FILE as FILE, STAGES, loadManifest, saveManifest as save, findPage as findPageIn } from "./manifest-lib.mjs";
 
@@ -143,7 +145,105 @@ switch (cmd) {
     }
     break;
   }
+  case "resume": {
+    // One-screen re-orientation after an interruption: the stage table PLUS the
+    // exact command(s) to run next with real paths. Five mid-run interruptions
+    // in the benchmark each cost minutes of "where was I?" — this answers it.
+    const m = load();
+    const host = (() => {
+      try {
+        return new URL(m.site).hostname.replace(/^www\./, "");
+      } catch {
+        return "<host>";
+      }
+    })();
+    const slugOf = (route) => (route === "/" ? "home" : route.replace(/^\//, "").replace(/[^a-z0-9]+/gi, "-").toLowerCase());
+    const specPathFor = (p, s) => s.spec || `docs/research/components/${slugOf(p.route)}/${s.name}.spec.md`;
+    const specTarget = (specPath) => {
+      try {
+        return readFileSync(specPath, "utf8").match(/^target:\s*(.+)$/m)?.[1]?.trim() || null;
+      } catch {
+        return null;
+      }
+    };
+
+    console.log(`Site: ${m.site}  ·  updated ${m.updatedAt || m.createdAt}\n`);
+    const actions = [];
+    for (const p of m.pages) {
+      console.log(`${p.route}  [${p.status}]`);
+      if (!p.sections.length) {
+        console.log("  (no sections yet)");
+        actions.push({ what: `map ${p.route}: extract + register sections`, cmds: [`node scripts/extract/page.mjs ${p.url}${m.pages.indexOf(p) > 0 ? " --no-site-files" : ""}`] });
+        continue;
+      }
+      for (const s of p.sections) {
+        const bar = STAGES.map((st) => (STAGES.indexOf(s.stage) >= STAGES.indexOf(st) ? "█" : "·")).join("");
+        const scores = Object.entries(s.scores).map(([k, v]) => `${k}:${v}%`).join(" ");
+        console.log(`  ${bar}  ${s.name.padEnd(24)} ${s.stage.padEnd(11)} ${scores}`);
+      }
+      const byStage = (st) => p.sections.filter((s) => s.stage === st);
+      for (const s of byStage("discovered")) {
+        actions.push({
+          what: `extract ${p.route} ${s.name}`,
+          cmds: [`node scripts/extract/section.mjs ${p.url} --selector "${s.selector}" --name ${s.name}`],
+        });
+      }
+      for (const s of byStage("extracted")) {
+        const spec = specPathFor(p, s);
+        actions.push({
+          what: `spec ${p.route} ${s.name}`,
+          cmds: [
+            `node scripts/spec-scaffold.mjs --route ${p.route} --section ${s.name}`,
+            `fill the <!-- AGENT: fill --> blocks in ${spec}`,
+            `node scripts/lint-spec.mjs ${spec}`,
+          ],
+        });
+      }
+      for (const s of byStage("specd")) {
+        const spec = specPathFor(p, s);
+        const target = specTarget(spec);
+        actions.push({
+          what: `build ${p.route} ${s.name}`,
+          cmds: [
+            `dispatch builder — spec ${spec}${target ? ` → ${target}` : ""}, shots docs/design-references/${host}/${s.name}-{pc,ipad,phone}.png`,
+          ],
+        });
+      }
+      for (const s of byStage("built")) {
+        actions.push({
+          what: `merge ${p.route} ${s.name}`,
+          cmds: [`merge worktree → npm run typecheck && npm run lint → node scripts/manifest.mjs set --route ${p.route} --section ${s.name} --stage merged`],
+        });
+      }
+      const merged = byStage("merged");
+      if (merged.length && merged.length === p.sections.length) {
+        actions.push({
+          what: `QA ${p.route} (all sections merged)`,
+          cmds: [`node scripts/diff.mjs --original ${p.url} --clone http://localhost:3000${p.route === "/" ? "" : p.route} --route ${p.route} --viewport all`],
+        });
+      } else {
+        for (const s of merged) {
+          actions.push({
+            what: `QA ${p.route} ${s.name}`,
+            cmds: [`node scripts/diff.mjs --original ${p.url} --clone http://localhost:3000${p.route === "/" ? "" : p.route} --selector "${s.selector}" --viewport all --name ${s.name}`],
+          });
+        }
+      }
+    }
+
+    if (!actions.length) {
+      console.log("\nALL DONE — every section is qa_passed. Run the completion report.");
+      break;
+    }
+    console.log(`\nNEXT (${actions.length} pending action(s), first ${Math.min(actions.length, 4)} shown):`);
+    for (const a of actions.slice(0, 4)) {
+      console.log(`\n▶ ${a.what}`);
+      for (const c of a.cmds) console.log(`    ${c}`);
+    }
+    if (actions.length > 4) console.log(`\n(+${actions.length - 4} more — re-run resume as stages advance)`);
+    break;
+  }
   default:
-    console.error("Commands: init | add-page | add-section | set | status | next");
+    console.error("Commands: init | add-page | add-section | set | status | next | resume");
     process.exit(1);
 }

@@ -78,7 +78,7 @@ node scripts/extract/tokens.mjs / css.mjs / assets.mjs / responsive.mjs / screen
 node scripts/diff.mjs --original <url> --clone <url> --viewport all   # scored pixel diff, all 3 viewports in one
                                                        #   call; 10-band breakdown names WHERE it mismatches
 node scripts/lint-spec.mjs docs/research/components    # spec completeness gate
-node scripts/manifest.mjs status                       # pipeline state / resume point
+node scripts/manifest.mjs resume                       # one-screen digest: stage table + exact next commands
 ```
 
 ## Supported agents
