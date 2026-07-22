@@ -33,6 +33,7 @@ Point it at a URL. `/clone-website` crawls the site, measures everything with sc
 | Agent guesses CSS values from screenshots | `scripts/extract/section.mjs` — full `getComputedStyle()` DOM walk, exact values |
 | Responsive behavior guessed from desktop | `scripts/extract/responsive.mjs` — measures real column counts at 390/768/1440px |
 | "Looks close enough" QA | `scripts/diff.mjs` — pixel-diff score per section per viewport; 95% threshold to pass |
+| Agent mis-transcribes values into specs | `scripts/spec-scaffold.mjs` — mechanical spec sections generated straight from the extraction JSON |
 | Incomplete specs slip through | `scripts/lint-spec.mjs` — mechanical completeness gate before any builder runs |
 | Long runs die and restart from zero | `docs/research/manifest.json` — every section's stage tracked; runs resume where they stopped |
 | Single-page only | `scripts/extract/crawl.mjs` — sitemap + nav discovery, shared header/footer extracted once |
@@ -67,6 +68,8 @@ node scripts/extract/page.mjs <url>                    # ONE-SHOT recon: tokens,
 node scripts/extract/crawl.mjs <url> [--max 25]        # discover pages
 node scripts/extract/section.mjs <url> --selector "x" --state hover:".card"   # hover/scroll/click state diffs
 node scripts/extract/probe.mjs <url> --selector "x"    # per-viewport value table for specs
+node scripts/spec-scaffold.mjs --route / --all         # generate the mechanical spec sections from the
+                                                       #   extraction JSON; agent fills judgment blocks only
 node scripts/extract/canvas.mjs <url>                  # capture <canvas> artwork as video/PNG
 node scripts/extract/tokens.mjs / css.mjs / assets.mjs / responsive.mjs / screenshot.mjs   # single-purpose re-runs
 node scripts/diff.mjs --original <url> --clone <url> --viewport all   # scored pixel diff, all 3 viewports in one

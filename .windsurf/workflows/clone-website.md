@@ -37,6 +37,7 @@ The scripts do the mechanical work — **use them instead of hand-measuring via 
 | `node scripts/extract/screenshot.mjs <url> [--selector css --name x ...]` | Extra screenshots at phone/iPad/PC (page.mjs already shot everything once). `--selector`/`--name` repeat — one call, 3 loads, N sections |
 | `node scripts/extract/tokens.mjs` / `css.mjs` / `assets.mjs` / `responsive.mjs` | Single-purpose re-runs of one page.mjs output when something needs refreshing |
 | `node scripts/diff.mjs --original <url> --clone <url> [--selector css] --viewport all [--threshold 95]` | Scored pixel diff, original vs clone. **`--viewport all` scores pc+ipad+phone in one call**, and the per-viewport **band breakdown names the y-range where the mismatch lives** — read it before guessing at causes. **Batched sweep: `--route </r>` (or repeated `--section name=css`) scores every section of a page from ONE load per side per viewport.** Original-side shots are cached 24h, so fix-iteration re-diffs only re-render the clone (`--fresh-original` to override) |
+| **`node scripts/spec-scaffold.mjs --route <r> --section <name>`** (or `--all`) | **Generates the mechanical spec sections** (frontmatter, DOM, computed styles, assets, text, responsive) straight from the extraction JSON into `docs/research/components/<route-slug>/<name>.spec.md`, leaving `<!-- AGENT: fill -->` blocks for the judgment parts. Never transcribe JSON values by hand |
 | `node scripts/lint-spec.mjs <spec.md\|dir>` | Mechanical spec-completeness gate — must pass before ANY builder dispatch |
 | `node scripts/manifest.mjs <cmd>` | Pipeline state: init / add-page / add-section / set / status / next |
 
@@ -128,44 +129,28 @@ the extraction is not done.
 
 Mark: `manifest.mjs set --route <r> --section <name> --stage extracted`
 
-### 3b. Write the spec — `docs/research/components/<route-slug>/<name>.spec.md`
+### 3b. Write the spec — scaffold first, judgment second
 
-```markdown
----
-component: HeroSection
-target: src/components/HeroSection.tsx
-page: /
-screenshot: docs/design-references/<host>/<name>-pc.png
-interaction_model: static | click-driven | scroll-driven | hover-driven | time-driven | mixed
-states: default, hover, scrolled…
-assets: public/images/x.webp, icons:ArrowRightIcon
-responsive: phone, ipad, pc
----
-
-# <Component> Specification
-
-## DOM Structure
-<hierarchy from the section walker — what contains what>
-
-## Computed Styles
-<exact values from sections/<name>.json, per element. Never estimated.>
-
-## States & Behaviors
-<per behavior: Trigger / State A / State B / Transition — from the --state diffs.
- Include the implementation approach (CSS transition, IntersectionObserver, etc.)>
-
-## Per-State Content
-<for tabbed/stateful sections: full content per state. "N/A — static" otherwise>
-
-## Assets
-<local public/ paths + icon components used. Note layered compositions explicitly.>
-
-## Text Content
-<verbatim from the walker output — never paraphrased>
-
-## Responsive Behavior
-<from responsive.json: real column counts and changes at 390 / 768 / 1440 + breakpoint>
+```bash
+node scripts/spec-scaffold.mjs --route <r> --section <name>    # or --all for the whole route
 ```
+
+This generates `docs/research/components/<route-slug>/<name>.spec.md` with every
+**mechanical** section already filled from the extraction JSON — frontmatter, DOM
+Structure, Computed Styles, Assets, Text Content, Responsive Behavior — and any
+captured states listed as reference data. **Never transcribe values from the JSON
+by hand**: the scaffold is generated from the same files and can't mistype.
+
+You fill ONLY the `<!-- AGENT: fill -->` blocks — the judgment calls:
+
+- `interaction_model:` in the frontmatter (static | click-driven | scroll-driven | hover-driven | time-driven | mixed)
+- `## States & Behaviors` — per behavior: Trigger / State A / State B / Transition + the implementation approach (CSS transition, IntersectionObserver, …). The scaffold lists each captured state's trigger/settle/diff summary as reference
+- `## Per-State Content` — full content per state for tabbed/stateful sections, or "N/A — static"
+- `## Notes` — builder guidance: component split, `src/data/` shape, gotchas
+
+An unfilled scaffold fails lint-spec on purpose (invalid interaction_model), so it
+can never reach a builder. Correct a generated section only when it's wrong about
+the page — don't restyle it.
 
 ### 3c. Lint gate
 ```bash
@@ -232,7 +217,7 @@ Whole-page diffs (`--selector` omitted) at all 3 viewports close out each page.
 - **Don't hardcode content in components.** Content → `src/data/`, components take props.
 - **Don't write "same as desktop" in a Responsive section.** Root font-size steps at breakpoints on most real sites, so every number changes. Run `probe.mjs` and write the real values for all three widths — lint-spec now rejects vague responsive sections.
 - **Don't forget `::before` / `::after`.** They carry hero overlays, heading underline bars, and icon glyphs. `section.mjs` captures them under a `pseudo` key — if a spec has none and the screenshot shows decorations, extraction was incomplete.
-- **Don't trust the spec over the extraction JSON.** Specs are hand-written summaries and drift; `sections/*.json` is machine-measured.
+- **Don't trust the spec over the extraction JSON.** The judgment sections are hand-written and can drift; `sections/*.json` is machine-measured (and the mechanical spec sections are generated from it).
 - **Don't declare done without QA scores.** "Looks right" is not a number.
 
 ## Completion Report
