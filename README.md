@@ -2,19 +2,17 @@
 
 ![ai-site-cloner](docs/cover.png)
 
-**Point AI at any website. Get a pixel-accurate Next.js clone back — measured, not eyeballed.**
+**Point AI at any website. Get a pixel-accurate, working Next.js clone back — measured, not eyeballed.**
 
-`/clone-website` turns Claude Code (or Cursor, Copilot, Gemini CLI — 12 tools supported) into a full cloning pipeline: it crawls the site, extracts every computed style with scripted Playwright measurement, generates auditable component specs, dispatches parallel builder agents in git worktrees, and loops a scored pixel-diff QA at phone/tablet/desktop widths until every section clears 95%. Then `/restyle` swaps in your own brand — colors, fonts, logo, copy — without touching the cloned layout.
+One command. `/clone-website` turns Claude Code (or Cursor, Copilot, Gemini CLI — 12 tools supported) into a full cloning pipeline: it crawls the site, extracts every computed style with scripted Playwright measurement, generates auditable component specs, dispatches parallel builder agents in git worktrees, and loops a scored pixel-diff QA at phone/tablet/desktop widths until every section clears 95%. Then `/restyle` swaps in your own brand — colors, fonts, logo, copy — without touching the cloned layout.
 
 Screenshot-to-code tools guess. This one measures.
 
 ## Proof: plausible.io, cloned
 
-Original on the left. AI clone on the right.
+![original vs clone — 99.71% pixel match](examples/plausible/comparison.png)
 
-![original vs clone](examples/plausible/comparison.png)
-
-9 sections × 3 viewports, scored by pixelmatch against the live site: **6 of 9 sections hit 100% on every viewport**, nothing below 97.5%. That includes the working nav dropdowns, the mobile menu overlay, and the 9-tier pricing slider with its monthly/yearly toggle and recomputing prices.
+**99.71% average pixel match** across 9 sections × 3 viewports, scored by pixelmatch against the live site — **6 of 9 sections hit a perfect 100% on every viewport**, nothing below 97.5%. And it's not a screenshot of a screenshot: the clone is a working app with the nav dropdowns, the mobile menu overlay, and the 9-tier pricing slider with its monthly/yearly toggle and recomputing prices — a clean, typed, componentized codebase you can actually maintain.
 
 | Section | PC | iPad | Phone |  | Section | PC | iPad | Phone |
 |---|---|---|---|---|---|---|---|---|
@@ -27,6 +25,23 @@ Original on the left. AI clone on the right.
 Full-page and phone side-by-sides, the data file, and how the run went: [`examples/plausible/`](examples/plausible/)
 
 **Second example:** [`examples/uploadthing/`](examples/uploadthing/) — its hero artwork is painted on a `<canvas>`, normally unclonable since there's no DOM to copy. The pipeline records it via `canvas.captureStream()` and embeds a looping video, so the clone keeps the artwork *and* its motion.
+
+## Fast. Accurate. Cheap on tokens.
+
+**Fast.** Recon of an entire page — design tokens, every asset downloaded, computed-style walks of every section, responsive measurements, and screenshots at all three viewports — is **one command and three page loads (~15 seconds)**. Builders run in parallel git worktrees, so five sections build in the time of one. QA opens with **one whole-page diff per viewport instead of dozens of per-section diffs** — on a good clone the entire QA phase is a handful of page loads — and the original site's screenshots are cached, so fix iterations only re-render your clone. Interrupted? `manifest.mjs resume` prints exactly where you were and the next command to run.
+
+**Accurate.** The AI never invents a value. Font sizes, padding, colors, real column counts, hover states, transition durations — everything a builder uses was measured from the live page by a script. A linter blocks incomplete specs from ever reaching a builder, and the pixelmatch score decides when a section is done: 95% per section per viewport, no exceptions, no "looks right to me." When a diff fails, `compare.mjs` walks both live DOMs and names the exact CSS properties that differ — so a fix is one targeted edit, not a guessing loop.
+
+**Cheap on tokens.** Cloning with an agent is a token problem before it's anything else — the naive approach pastes screenshots and raw DOM into context and burns six figures of tokens guessing. Here the agent never reads a raw page. The scripts write compact artifacts, and the agent reads only the interface:
+
+- Section walks ship in a **compact format** (style dictionary + inheritance pruning) — the plausible.io extraction dropped from 889KB to 445KB, and nobody reads the JSON anyway: `resolve-walk.mjs` answers questions about any single node
+- Interaction captures store **only what changed**: the pricing toggle's capture is 2.9KB, down from 368KB of before/after DOM dumps
+- Specs are **generated from the JSON** — the agent writes ~10 judgment lines per section instead of transcribing hundreds of values, and each builder receives one 2–4KB spec, not the site
+- Screenshots are judged at **640px review size** (~half the bytes); full-res exists only for pixelmatch and builders
+- On Tailwind-style sites the extraction stores the **cleaned source markup** — plausible's hero is 1.7KB of HTML that *is* the spec
+- QA returns **numbers, not images**: match scores and a 10-band breakdown naming the failing y-range; an image gets opened only when something fails
+
+Net effect: the agent-facing surface of a full plausible-sized run fits in about half a megabyte of artifacts, and specs + scores are the only parts an agent routinely reads.
 
 ## Quick Start
 

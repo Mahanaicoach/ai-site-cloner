@@ -4,8 +4,6 @@ A real end-to-end run of `/clone-website` against **https://plausible.io** — t
 
 > Plausible Analytics is a real product by Plausible Insights OÜ. Cloned here as a technical exercise to demonstrate pixel fidelity only. Don't republish someone else's brand.
 
-**Original (left) vs clone (right):**
-
 ![original vs clone](comparison.png)
 
 ## Result
