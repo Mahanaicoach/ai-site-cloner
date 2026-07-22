@@ -491,7 +491,9 @@ export function writeReviewPng(src, destPath) {
   } catch {
     return false; // unreadable source — review copy is best-effort
   }
-  if (!img?.data || !img.width || img.width <= REVIEW_WIDTH) return false;
+  // Skip marginal downscales (e.g. ipad's 768 -> 640): resampling breaks PNG
+  // run-length compressibility, so a small shrink often GROWS the file.
+  if (!img?.data || !img.width || img.width <= REVIEW_WIDTH * 1.25) return false;
   const scale = REVIEW_WIDTH / img.width;
   const w = REVIEW_WIDTH;
   const h = Math.max(1, Math.round(img.height * scale));
