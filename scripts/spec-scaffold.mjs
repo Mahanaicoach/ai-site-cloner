@@ -31,6 +31,11 @@ import { join, basename } from "node:path";
 import { hostOf, slugify, parseArgs, toList } from "./lib.mjs";
 import { walkNodes, resolveStyles, nodeLabel } from "./extract/walk-format.mjs";
 
+// A section this small with zero captured states doesn't need the full spec
+// ceremony — lint-spec accepts the lighter schema when tier: light is set,
+// and cross-checks the walk so the tier can't be claimed to dodge rigor.
+const LIGHT_TIER_MAX_NODES = 15;
+
 const args = parseArgs(process.argv.slice(2));
 const research = typeof args.research === "string" ? args.research : "docs/research";
 const outRoot = typeof args.out === "string" ? args.out : join(research, "components");
@@ -335,6 +340,8 @@ for (const name of sections) {
   const tree = doc.tree;
   const captures = stateCaptures(name);
   const comp = componentName(name);
+  const nodeCount = [...walkNodes(tree)].length;
+  const light = nodeCount <= LIGHT_TIER_MAX_NODES && captures.length === 0;
   const { lines: assetLines, fmAssets } = assetInfo(doc, tree);
   const statesFm = ["default", ...captures.map((c) => c.suffix)].join(", ");
 
@@ -370,7 +377,7 @@ screenshot: docs/design-references/${host}/${name}-pc.png
 interaction_model: ${AGENT("one of: static | click-driven | scroll-driven | hover-driven | time-driven | mixed")}
 states: ${statesFm}
 assets: ${fmAssets}
-responsive: phone, ipad, pc
+responsive: phone, ipad, pc${light ? "\ntier: light" : ""}
 ---
 
 # ${comp} Specification
@@ -406,6 +413,6 @@ ${AGENT("implementation notes for the builder: component split, data file shape 
   const outPath = join(outDir, `${name}.spec.md`);
   writeFileSync(outPath, md);
   const bodyLines = md.split("\n").length;
-  console.log(`✓ ${outPath} (${bodyLines} lines, ${captures.length} captured state(s)) — fill the <!-- AGENT: fill --> blocks, then lint`);
+  console.log(`✓ ${outPath} (${bodyLines} lines, ${captures.length} captured state(s)${light ? ", tier: light" : ""}) — fill the <!-- AGENT: fill --> blocks, then lint`);
 }
 process.exit(failed ? 1 : 0);

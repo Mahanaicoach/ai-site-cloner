@@ -161,6 +161,12 @@ An unfilled scaffold fails lint-spec on purpose (invalid interaction_model), so 
 can never reach a builder. Correct a generated section only when it's wrong about
 the page — don't restyle it.
 
+**Light tier:** for tiny static sections (walk ≤15 nodes, zero captured states)
+the scaffold sets `tier: light` — States & Behaviors / Per-State Content may
+stay a single "N/A — static" line and the minimum-length warning is waived.
+Don't set it by hand: lint-spec cross-checks the walk and rejects a light tier
+the section doesn't qualify for.
+
 **Utility-CSS sites (Tailwind and friends):** page.mjs detects them and captures
 each section's cleaned markup; the scaffold then contains a `## Source Markup`
 section — the class list IS the spec. Builders translate the markup first and

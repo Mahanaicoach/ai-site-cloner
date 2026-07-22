@@ -5,9 +5,50 @@
 // Usage: node scripts/lint-spec.mjs <spec.md> [more.spec.md ...]
 //        node scripts/lint-spec.mjs docs/research/components   (lints every *.spec.md inside)
 // Exit 1 if any spec fails.
+//
+// Tiers: a spec may declare `tier: light` in its frontmatter (spec-scaffold
+// sets it mechanically). The full template is overkill for a static CTA — both
+// agents in the head-to-head benchmark said so — so a section whose walk shows
+// ≤ LIGHT_TIER_MAX_NODES (15) nodes AND has zero captured states may ship the
+// lighter schema: same headings, but States & Behaviors / Per-State Content
+// may be a single "N/A — static" line and the minimum-length warning is
+// waived. 15 nodes ≈ heading + paragraph + a couple of CTAs — anything with a
+// grid, tabs, or captured states is past it. The linter cross-checks the walk
+// JSON when it can find it, so the tier can't be claimed to dodge rigor.
 import { readFileSync, statSync, readdirSync, existsSync } from "node:fs";
 import { join, basename, dirname, relative, isAbsolute } from "node:path";
 import { selfReport, findPage, findSection, advanceStage } from "./manifest-lib.mjs";
+import { walkNodes } from "./extract/walk-format.mjs";
+
+const LIGHT_TIER_MAX_NODES = 15;
+
+// Ground-truth check for `tier: light`: locate the section's walk JSON under
+// any research host dir and verify the claim. Returns null when unverifiable.
+function lightTierViolation(name) {
+  const root = "docs/research";
+  if (!existsSync(root)) return null;
+  for (const host of readdirSync(root)) {
+    const walkPath = join(root, host, "sections", `${name}.json`);
+    if (!existsSync(walkPath)) continue;
+    try {
+      const doc = JSON.parse(readFileSync(walkPath, "utf8"));
+      if (doc.tree) {
+        const n = [...walkNodes(doc.tree)].length;
+        if (n > LIGHT_TIER_MAX_NODES) return `walk has ${n} nodes (max ${LIGHT_TIER_MAX_NODES} for light tier)`;
+      }
+      for (const f of readdirSync(join(root, host, "sections"))) {
+        if (f.startsWith(`${name}-`) && f.endsWith(".json")) {
+          const cap = JSON.parse(readFileSync(join(root, host, "sections", f), "utf8"));
+          if (cap.trigger) return `captured state exists (${f}) — light tier is for stateless sections`;
+        }
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
 
 const REQUIRED_FRONTMATTER = ["component", "target", "page", "screenshot", "interaction_model", "states", "assets", "responsive"];
 const INTERACTION_MODELS = ["static", "click-driven", "scroll-driven", "hover-driven", "time-driven", "mixed"];
@@ -68,6 +109,14 @@ for (const file of files) {
     for (const key of REQUIRED_FRONTMATTER) {
       if (!meta[key]) errors.push(`Frontmatter missing or empty: "${key}"`);
     }
+    const light = meta.tier === "light";
+    if (meta.tier && !light) {
+      errors.push(`tier must be "light" or omitted (got "${meta.tier}")`);
+    }
+    if (light) {
+      const violation = lightTierViolation(basename(file).replace(/\.spec\.md$/, ""));
+      if (violation) errors.push(`tier: light rejected — ${violation}. Use the full schema.`);
+    }
     if (meta.interaction_model && !INTERACTION_MODELS.includes(meta.interaction_model)) {
       errors.push(`interaction_model must be one of: ${INTERACTION_MODELS.join(", ")} (got "${meta.interaction_model}")`);
     }
@@ -111,7 +160,7 @@ for (const file of files) {
     if (bodyLines > MAX_BODY_LINES) {
       errors.push(`Spec body is ${bodyLines} lines outside code fences (max ${MAX_BODY_LINES}). Complexity budget exceeded — SPLIT this section into smaller components.`);
     }
-    if (bodyLines < MIN_BODY_LINES) {
+    if (bodyLines < MIN_BODY_LINES && !light) {
       warnings.push(`Spec body is only ${bodyLines} lines — is extraction really complete?`);
     }
     if (!/getComputedStyle|px|rem|rgb|oklch/.test(body)) {
