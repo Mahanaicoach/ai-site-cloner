@@ -95,9 +95,21 @@ for (const file of files) {
         if (content.length < 10) errors.push(`Section "${h}" is empty — fill it or write "N/A" with a reason`);
       }
     }
-    const bodyLines = body.split("\n").length;
+    // Fenced code blocks (the generated Source Markup on utility-CSS sites) are
+    // machine-quoted, not hand-written — they don't count against the
+    // complexity budget, which exists to bound what a BUILDER has to reason
+    // through, and markup is what the builder translates, not extra reasoning.
+    let inFence = false;
+    let bodyLines = 0;
+    for (const line of body.split("\n")) {
+      if (/^```/.test(line.trim())) {
+        inFence = !inFence;
+        continue;
+      }
+      if (!inFence) bodyLines++;
+    }
     if (bodyLines > MAX_BODY_LINES) {
-      errors.push(`Spec body is ${bodyLines} lines (max ${MAX_BODY_LINES}). Complexity budget exceeded — SPLIT this section into smaller components.`);
+      errors.push(`Spec body is ${bodyLines} lines outside code fences (max ${MAX_BODY_LINES}). Complexity budget exceeded — SPLIT this section into smaller components.`);
     }
     if (bodyLines < MIN_BODY_LINES) {
       warnings.push(`Spec body is only ${bodyLines} lines — is extraction really complete?`);

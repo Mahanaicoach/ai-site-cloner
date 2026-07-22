@@ -781,6 +781,71 @@ export function diffNode(a, b, path, out) {
   (a.children || []).forEach((c, i) => diffNode(c, b.children?.[i], `${path} > ${c.tag}[${i}]`, out));
 }
 
+// ---------------------------------------------------------------------------
+// Utility-CSS fast path (Tailwind and friends)
+//
+// On utility-class sites the class list IS the spec — `px-4 md:flex gap-6`
+// carries more buildable information than any computed-style dump, including
+// the responsive variants computed styles can't see. Detect the pattern, and
+// when present capture each section's cleaned markup so specs can quote it.
+// ---------------------------------------------------------------------------
+
+// Fingerprint: share of class tokens that look like single-purpose utilities
+// (reuses the same pattern nameFromSelector treats as "utility soup"), plus
+// variant tokens (`md:`, arbitrary `[...]` values) as a strong tell.
+export async function detectUtilityCss(page) {
+  return page.evaluate((reSource) => {
+    const re = new RegExp(reSource);
+    const els = [...document.querySelectorAll("body *")].slice(0, 1500);
+    let tokens = 0, utility = 0, variant = 0;
+    for (const el of els) {
+      const cls = typeof el.className === "string" ? el.className : el.className?.baseVal || "";
+      for (const c of cls.split(/\s+/)) {
+        if (!c) continue;
+        tokens++;
+        if (re.test(c)) utility++;
+        if (c.includes(":") || c.includes("[")) variant++;
+      }
+    }
+    const ratio = tokens ? utility / tokens : 0;
+    return {
+      detected: tokens >= 40 && (ratio >= 0.6 || (ratio >= 0.45 && variant / tokens >= 0.1)),
+      ratio: Number(ratio.toFixed(3)),
+      classTokens: tokens,
+      variantTokens: variant,
+    };
+  }, UTILITY_CLASS.source);
+}
+
+// Cleaned outerHTML per selector: scripts/styles removed, svg path data and
+// base64 payloads stripped (they're bulk, not spec), everything else verbatim.
+export async function collectSectionHtml(page, selectors) {
+  return page.evaluate((sels) => {
+    const clean = (el) => {
+      const clone = el.cloneNode(true);
+      for (const n of clone.querySelectorAll("script,style,noscript,template")) n.remove();
+      for (const p of clone.querySelectorAll("path[d]")) p.setAttribute("d", "…");
+      for (const n of clone.querySelectorAll("*")) {
+        for (const attr of ["src", "srcset", "href", "xlink:href"]) {
+          const v = n.getAttribute?.(attr);
+          if (v && v.startsWith("data:")) n.setAttribute(attr, "data:stripped");
+        }
+        const st = n.getAttribute?.("style");
+        if (st && st.includes("base64,")) {
+          n.setAttribute("style", st.replace(/url\((['"]?)data:[^)]*\)/g, "url($1data:stripped)"));
+        }
+      }
+      return clone.outerHTML;
+    };
+    const out = {};
+    for (const sel of sels) {
+      const el = document.querySelector(sel);
+      out[sel] = el ? clean(el) : null;
+    }
+    return out;
+  }, selectors);
+}
+
 // Short, readable section name from an auto-detected selector. Real ids and
 // semantic tags make good names; Tailwind utility soup does not — `.flex` or an
 // escaped `bg-\[\#150002\]` (whose \# would false-match a naive id regex) must

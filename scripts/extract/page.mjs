@@ -58,6 +58,8 @@ import {
   summarizeResponsive,
   walkSections,
   nameFromSelector,
+  detectUtilityCss,
+  collectSectionHtml,
 } from "./collectors.mjs";
 import { compactWalk, toLegacy } from "./walk-format.mjs";
 import { selfReport, findPage, findSection, advanceStage, updatePageStatus, routeOfUrl } from "../manifest-lib.mjs";
@@ -199,7 +201,7 @@ if (explicit.length) {
 
 // ── 3. Measure everything (order matters: measure BEFORE freeze/screenshots) ─
 const selectors = sections.map((s) => s.selector);
-const [signatures, walks, tokens, css, assetsFound] = await Promise.all([
+const [signatures, walks, tokens, css, assetsFound, utilityCss] = await Promise.all([
   // signatures at all three viewports — one evaluate per page
   (async () => {
     const out = {};
@@ -214,11 +216,20 @@ const [signatures, walks, tokens, css, assetsFound] = await Promise.all([
   doSiteFiles ? collectTokens(pc) : null,
   doSiteFiles ? collectCss(pc) : null,
   collectAssets(pc),
+  detectUtilityCss(pc),
 ]);
+
+// Utility-CSS fast path: on Tailwind-style sites the class list IS the spec,
+// so each section's cleaned markup rides along in its JSON and spec-scaffold
+// quotes it instead of dumping exhaustive computed styles.
+const sectionHtml = utilityCss?.detected ? await collectSectionHtml(pc, selectors) : {};
+if (utilityCss?.detected) {
+  console.error(`  ✓ utility-CSS detected (${(utilityCss.ratio * 100).toFixed(0)}% of ${utilityCss.classTokens} class tokens) — capturing section markup`);
+}
 
 // ── 4. Write research files ─────────────────────────────────────────────────
 const meta = { url, generatedAt: new Date().toISOString() };
-if (tokens) writeJson(`docs/research/${host}/tokens.json`, { ...meta, ...tokens });
+if (tokens) writeJson(`docs/research/${host}/tokens.json`, { ...meta, utilityCss, ...tokens });
 if (css) {
   // interactiveCount/blockedCount are stdout-summary fields, not research data
   const cssOut = { ...meta, ...css };
@@ -240,7 +251,7 @@ writeJson(`docs/research/${host}/responsive.json`, {
 });
 for (const s of sections) {
   const walk = walks[s.selector];
-  const base = { ...meta, viewport: "pc", selector: s.selector };
+  const base = { ...meta, viewport: "pc", selector: s.selector, ...(sectionHtml[s.selector] ? { html: sectionHtml[s.selector] } : {}) };
   if (args.legacy || walk?.error) {
     writeJson(`docs/research/${host}/sections/${s.name}.json`, { ...base, tree: args.legacy ? toLegacy(walk) : walk });
   } else {
@@ -331,6 +342,7 @@ console.log(
         pcHeight: signatures.pc[s.selector]?.height ?? null,
         responsive: summarizeResponsive(signatures, s.selector).changes[0],
       })),
+      utilityCss: utilityCss?.detected ? `detected (${(utilityCss.ratio * 100).toFixed(0)}% utility tokens) — sections carry html` : "not detected",
       siteFiles: doSiteFiles ? ["tokens.json", "css.json"] : [],
       files: {
         research: `docs/research/${host}/`,

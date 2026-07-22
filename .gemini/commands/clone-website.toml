@@ -163,6 +163,11 @@ An unfilled scaffold fails lint-spec on purpose (invalid interaction_model), so 
 can never reach a builder. Correct a generated section only when it's wrong about
 the page — don't restyle it.
 
+**Utility-CSS sites (Tailwind and friends):** page.mjs detects them and captures
+each section's cleaned markup; the scaffold then contains a `## Source Markup`
+section — the class list IS the spec. Builders translate the markup first and
+verify with probe values second; computed styles shrink to a few key anchors.
+
 ### 3c. Lint gate
 ```bash
 node scripts/lint-spec.mjs docs/research/components/<route-slug>/<name>.spec.md
@@ -177,6 +182,7 @@ Every builder receives IN ITS PROMPT (never "go read the file"):
 - Shared imports available: `cn()`, `icons.tsx` components, shadcn `ui/` primitives, types from `src/types/`
 - The target file path, and the data file to create in `src/data/` if the section has content collections
 - The rule: verify `npx tsc --noEmit` passes before finishing
+- On utility-CSS sites (spec has `## Source Markup`): "translate the markup's class semantics first, then verify the result against the probe values — don't rebuild from computed styles alone"
 - **The ground-truth rule:** "`docs/research/<host>/sections/<name>.json` and `responsive.json` are ground truth. If this spec contradicts them, follow the JSON and report the discrepancy." Builders reliably catch spec errors this way — treat their reports as corrections to make to the spec file. Walk JSON is stored compact — builders resolve any node's full styles with `node scripts/resolve-walk.mjs <json> --node <path>` instead of parsing the styleTable by hand.
 
 Complex section (3+ distinct sub-components) → one builder per sub-component + one for the wrapper, sub-components first. **Don't wait** — while builders run, extract the next section.

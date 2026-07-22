@@ -161,7 +161,7 @@ function summarizeStyles(s, hasText) {
   return parts.join("; ");
 }
 
-function styleLines(doc, tree) {
+function styleLines(doc, tree, maxLines = MAX_STYLE_LINES) {
   const seen = new Map();
   const entries = [];
   for (const { node, ancestors } of walkNodes(tree)) {
@@ -184,11 +184,11 @@ function styleLines(doc, tree) {
     seen.set(sig, entry);
     entries.push(entry);
   }
-  const lines = entries.slice(0, MAX_STYLE_LINES).map(
+  const lines = entries.slice(0, maxLines).map(
     (e) => `- **${e.label}**${e.count > 1 ? ` ×${e.count}` : ""}${e.size}: ${e.summary}`
   );
-  if (entries.length > MAX_STYLE_LINES) {
-    lines.push(`- … +${entries.length - MAX_STYLE_LINES} more styled nodes — resolve any node with \`node scripts/resolve-walk.mjs\` (JSON is ground truth)`);
+  if (entries.length > maxLines) {
+    lines.push(`- … +${entries.length - maxLines} more styled nodes — resolve any node with \`node scripts/resolve-walk.mjs\` (JSON is ground truth)`);
   }
   return lines;
 }
@@ -346,6 +346,22 @@ for (const name of sections) {
       )
     : [`- No state captures on disk. Cross-check css.json interactiveStates — a :hover/:focus rule for this section with no capture means extraction is not done.`];
 
+  // Utility-CSS fast path: when the extraction captured cleaned markup, the
+  // class list IS the spec — quote it and keep computed styles down to a few
+  // key anchors for verification instead of an exhaustive dump.
+  const markupBlock = doc.html
+    ? `
+## Source Markup
+Utility CSS detected — translate this markup first, verify with probe values second.
+\`\`\`html
+${doc.html}
+\`\`\`
+`
+    : "";
+  const stylesBlock = doc.html
+    ? styleLines(doc, tree, 8).join("\n") + "\n- Key anchors only — the Source Markup above is the primary spec; resolve any node via resolve-walk.mjs."
+    : styleLines(doc, tree).join("\n");
+
   const md = `---
 component: ${comp}
 target: src/components/${comp}.tsx
@@ -361,9 +377,9 @@ responsive: phone, ipad, pc
 
 ## DOM Structure
 ${domStructure(tree).join("\n")}
-
+${markupBlock}
 ## Computed Styles
-${styleLines(doc, tree).join("\n")}
+${stylesBlock}
 
 ## States & Behaviors
 ${AGENT("per behavior: Trigger / State A / State B / Transition + implementation approach (CSS transition, IntersectionObserver, …). Mechanical capture data below is reference, not a substitute.")}
