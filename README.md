@@ -65,7 +65,19 @@ Net effect: the agent-facing surface of a full plausible-sized run fits in about
 
 ## How it works
 
-**Crawl → Recon → Foundation → Sections → Assembly → QA loop** — six phases, one command, resumable at any point.
+Six phases, one command, resumable at any point:
+
+```mermaid
+flowchart LR
+    A["🕸️ Crawl<br/><small>discover pages</small>"] --> B["📐 Recon<br/><small>measure everything</small>"]
+    B --> C["🎨 Foundation<br/><small>tokens · fonts · icons</small>"]
+    C --> D["🧱 Sections<br/><small>spec → lint gate →<br/>parallel builders</small>"]
+    D --> E["🧩 Assembly<br/><small>routes + data</small>"]
+    E --> F{"✅ QA<br/><small>pixel-diff vs live site</small>"}
+    F -- "&lt; 95% — compare.mjs<br/>names the exact fix" --> D
+    F -- "≥ 95% × 3 viewports" --> G["🚀 Clone done<br/><small>/restyle to rebrand</small>"]
+    style G fill:#5850ec,color:#fff,stroke:#4c3fe0
+```
 
 | | Phase | What happens |
 |:---:|---|---|
