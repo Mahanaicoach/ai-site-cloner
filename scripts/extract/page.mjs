@@ -22,6 +22,10 @@
 //     [--depth 5] [--no-download] [--no-shots] [--no-section-shots]
 //     [--no-site-files]                 skip tokens.json/css.json (they're
 //                                       site-wide — only the first page needs them)
+//     [--legacy]                        emit the old full-blob walk format
+//                                       (default is compact-v1: style dictionary
+//                                       + inherited-prop pruning, ~70% smaller;
+//                                       resolve any node with resolve-walk.mjs)
 import { mkdirSync } from "node:fs";
 import {
   VIEWPORTS,
@@ -47,6 +51,7 @@ import {
   walkSections,
   nameFromSelector,
 } from "./collectors.mjs";
+import { compactWalk, toLegacy } from "./walk-format.mjs";
 
 const t0 = Date.now();
 const args = parseArgs(process.argv.slice(2));
@@ -137,12 +142,14 @@ writeJson(`docs/research/${host}/responsive.json`, {
   })),
 });
 for (const s of sections) {
-  writeJson(`docs/research/${host}/sections/${s.name}.json`, {
-    ...meta,
-    viewport: "pc",
-    selector: s.selector,
-    tree: walks[s.selector],
-  });
+  const walk = walks[s.selector];
+  const base = { ...meta, viewport: "pc", selector: s.selector };
+  if (args.legacy || walk?.error) {
+    writeJson(`docs/research/${host}/sections/${s.name}.json`, { ...base, tree: args.legacy ? toLegacy(walk) : walk });
+  } else {
+    const { tree, styleTable } = compactWalk(walk);
+    writeJson(`docs/research/${host}/sections/${s.name}.json`, { ...base, format: "compact-v1", tree, styleTable });
+  }
 }
 
 // ── 5. Downloads + screenshots overlap (network vs browser work) ────────────

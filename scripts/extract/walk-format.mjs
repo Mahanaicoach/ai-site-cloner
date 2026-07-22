@@ -148,14 +148,17 @@ export function compactWalk(tree) {
   return { tree: compacted, styleTable };
 }
 
-// The subset of a styleTable a single tree actually references — per-section
-// files carry only their own entries.
-export function usedStyleTable(tree, styleTable) {
-  const used = {};
-  for (const { node } of walkNodes(tree)) {
-    if (node.style && styleTable[node.style]) used[node.style] = styleTable[node.style];
+// Reproduce the pre-compact on-disk format exactly (for --legacy): the walker
+// now always records inherited props, so the old SKIP filter is re-applied here.
+export function toLegacy(tree) {
+  if (!tree || tree.error) return tree;
+  const styles = {};
+  for (const [p, v] of Object.entries(tree.styles || {})) {
+    if (!SKIP_VALUES.has(v)) styles[p] = v;
   }
-  return used;
+  const out = { ...tree, styles };
+  if (tree.children) out.children = tree.children.map(toLegacy);
+  return out;
 }
 
 // Stable content hash of a node's identity (tag + classes) — used by the

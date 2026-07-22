@@ -70,6 +70,8 @@ node scripts/extract/section.mjs <url> --selector "x" --state hover:".card"   # 
 node scripts/extract/probe.mjs <url> --selector "x"    # per-viewport value table for specs
 node scripts/spec-scaffold.mjs --route / --all         # generate the mechanical spec sections from the
                                                        #   extraction JSON; agent fills judgment blocks only
+node scripts/resolve-walk.mjs <sections.json> --node 0.2.1   # resolved styles for any walk node (walks are
+                                                       #   stored compact: style dict + inheritance pruning)
 node scripts/extract/canvas.mjs <url>                  # capture <canvas> artwork as video/PNG
 node scripts/extract/tokens.mjs / css.mjs / assets.mjs / responsive.mjs / screenshot.mjs   # single-purpose re-runs
 node scripts/diff.mjs --original <url> --clone <url> --viewport all   # scored pixel diff, all 3 viewports in one

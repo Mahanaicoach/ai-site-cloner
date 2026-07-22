@@ -669,12 +669,17 @@ export async function walkSections(page, selectors, { depth = 5 } = {}) {
         "whiteSpace","textOverflow","aspectRatio","order","flexGrow","flexShrink","flexBasis",
       ];
       const SKIP = new Set(["none","normal","auto","0px","rgba(0, 0, 0, 0)","visible","static","initial",""]);
+      // CSS-inherited props are ALWAYS recorded, even at default-looking values:
+      // the compact format prunes them against the parent Node-side, and pruning
+      // is only exact when the raw value is known ("normal" under a parent with
+      // letter-spacing set is a real override, not a default to drop).
+      const INHERITED = new Set(["fontSize","fontWeight","fontFamily","lineHeight","letterSpacing","color","textAlign","textTransform","whiteSpace","cursor","visibility"]);
       function styles(element) {
         const cs = getComputedStyle(element);
         const out = {};
         for (const p of PROPS) {
           const v = cs[p];
-          if (v !== undefined && !SKIP.has(v)) out[p] = v;
+          if (v !== undefined && (INHERITED.has(p) || !SKIP.has(v))) out[p] = v;
         }
         return out;
       }

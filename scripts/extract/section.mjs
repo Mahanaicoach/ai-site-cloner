@@ -7,6 +7,7 @@
 //   node scripts/extract/section.mjs <url> --selector "header" [--name header]
 //     [--viewport pc|ipad|phone] [--depth 5]
 //     [--state scroll:600 | click:.tab-btn | hover:.card]
+//     [--legacy]   emit the old full-blob walk format (default: compact-v1)
 //
 //   --selector and --name repeat, and every section is walked from a SINGLE
 //   page load. Extracting five sections is one navigation, not five:
@@ -29,6 +30,7 @@ import {
   toList,
 } from "../lib.mjs";
 import { walkSections, diffNode } from "./collectors.mjs";
+import { compactWalk, toLegacy } from "./walk-format.mjs";
 
 const args = parseArgs(process.argv.slice(2));
 const url = args._[0];
@@ -95,7 +97,13 @@ if (args.state) {
   }
 } else {
   for (const { selector, name } of targets) {
-    writeJson(`docs/research/${hostOf(url)}/sections/${name}.json`, { ...meta, selector, tree: stateA[selector] });
+    const base = { ...meta, selector };
+    if (args.legacy || stateA[selector]?.error) {
+      writeJson(`docs/research/${hostOf(url)}/sections/${name}.json`, { ...base, tree: args.legacy ? toLegacy(stateA[selector]) : stateA[selector] });
+    } else {
+      const { tree, styleTable } = compactWalk(stateA[selector]);
+      writeJson(`docs/research/${hostOf(url)}/sections/${name}.json`, { ...base, format: "compact-v1", tree, styleTable });
+    }
   }
   console.log(`Extracted ${targets.length} section(s) from one page load.`);
 }
