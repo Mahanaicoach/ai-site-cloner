@@ -1,17 +1,17 @@
 {
-  "name": "site-cloner",
-  "version": "0.2.0",
+  "name": "ai-site-cloner",
+  "version": "0.3.0",
   "private": true,
-  "description": "Clone any multi-page website into a clean Next.js codebase with Claude Code — scripted extraction, spec-driven parallel builds, and scored visual QA",
+  "description": "Clone any website into a pixel-accurate Next.js codebase with AI — scripted Playwright extraction (no eyeballing), spec-gated parallel builder agents, and scored pixel-diff QA at phone/tablet/desktop",
   "author": "Mahanaicoach",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Mahanaicoach/site-cloner.git"
+    "url": "git+https://github.com/Mahanaicoach/ai-site-cloner.git"
   },
-  "homepage": "https://github.com/Mahanaicoach/site-cloner#readme",
+  "homepage": "https://github.com/Mahanaicoach/ai-site-cloner#readme",
   "bugs": {
-    "url": "https://github.com/Mahanaicoach/site-cloner/issues"
+    "url": "https://github.com/Mahanaicoach/ai-site-cloner/issues"
   },
   "engines": {
     "node": ">=22"

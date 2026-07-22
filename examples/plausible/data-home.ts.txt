@@ -1,0 +1,210 @@
+// All homepage content for the plausible.io clone — verbatim from extraction
+// (docs/research/plausible.io/sections/*.json + captured page HTML).
+import type {
+  NavDropdownFeature,
+  NavLinkColumn,
+  FeatureItem,
+  StatItem,
+  Testimonial,
+  PricingVolume,
+  PricingPlan,
+  FooterColumn,
+} from "@/types";
+
+/* ---------------- Nav ---------------- */
+
+export const whyPlausibleFeatures: NavDropdownFeature[] = [
+  { title: "Simple analytics dashboard", description: "Get all the important stats on one single page. No training necessary.", href: "/simple-web-analytics", icon: "chart-bar" },
+  { title: "Lightweight script", description: "Loads fast and won't affect your page speed or Core Web Vitals. A fraction of the size of Google Analytics.", href: "/lightweight-web-analytics", icon: "lightning" },
+  { title: "Privacy-friendly analytics", description: "Built with visitor privacy in mind. No cookie banner required.", href: "/privacy-focused-web-analytics", icon: "shield-check" },
+  { title: "Open source", description: "The code is public and auditable. Verify exactly what we collect, and run it yourself if you want to.", href: "/open-source-website-analytics", icon: "code" },
+  { title: "EU-hosted", description: "Built and hosted in the EU. Your data never leaves European-owned infrastructure.", href: "/eu-hosted-web-analytics", icon: "flag" },
+];
+
+export const whoItsForColumn: NavLinkColumn = {
+  heading: "Who it's for",
+  links: [
+    { label: "Ecommerce", href: "/for-ecommerce" },
+    { label: "SaaS", href: "/for-saas" },
+    { label: "Agencies", href: "/for-freelancers-agencies" },
+    { label: "Creators & publishers", href: "/for-bloggers-creators" },
+    { label: "White-label analytics", href: "/white-label-web-analytics" },
+    { label: "Enterprise", href: "/enterprise-web-analytics" },
+  ],
+};
+
+export const compareColumn: NavLinkColumn = {
+  heading: "Compare",
+  links: [
+    { label: "vs Google Analytics", href: "/vs-google-analytics" },
+    { label: "Migrate from GA4", href: "/migrate-from-google-analytics" },
+    { label: "vs Matomo", href: "/vs-matomo" },
+    { label: "vs Cloudflare Analytics", href: "/vs-cloudflare-web-analytics" },
+  ],
+};
+
+export const resourcesFeatures: NavDropdownFeature[] = [
+  { title: "Documentation", description: "Everything you need to get up and running with Plausible.", href: "/docs", icon: "book-open" },
+  { title: "Blog", description: "Stories about privacy, web analytics and building Plausible.", href: "/blog", icon: "pencil-alt" },
+  { title: "Tools", description: "Free calculators and utilities to help you understand your analytics data.", href: "/tools", icon: "adjustments" },
+  { title: "Status", description: "Check the live status and uptime of Plausible services.", href: "https://plausible.io/status", icon: "check-circle", external: true },
+  { title: "Product updates", description: "Major new features and improvements.", href: "https://plausible.io/changelog", icon: "speakerphone" },
+];
+
+export const followLinks = [
+  { label: "Twitter", href: "https://twitter.com/PlausibleHQ" },
+  { label: "Bluesky", href: "https://bsky.app/profile/plausible.io" },
+  { label: "Mastodon", href: "https://fosstodon.org/@plausible" },
+  { label: "LinkedIn", href: "https://www.linkedin.com/company/plausible-analytics/" },
+];
+
+/* ---------------- Features ---------------- */
+
+export const features: (FeatureItem & { ddClass?: string })[] = [
+  { title: "Automatic scroll depth tracking", description: "Scroll depth from 1 to 100 percent is tracked automatically on every page. No setup, no tag managers. Create scroll depth goals without code. ", ddClass: "lg:py-0 lg:pb-4" },
+  { title: "Monitor traffic from AI tools", description: "See which AI tools like ChatGPT, Perplexity, or Claude send you traffic. Identify pages that attract AI visitors and the conversions they complete. " },
+  { title: "Analyze SEO performance", description: "Connect Search Console to see search queries and organic performance directly in your Plausible dashboard. Track SEO content and conversions in one place." },
+  { title: "Measure paid ads and campaigns", description: "Track UTM campaigns with automatic channel grouping for Paid Search or Affiliates. Analyze landing pages, conversions and locations." },
+  { title: "Real-time dashboard", description: "Monitor live traffic with the same metrics as your main dashboard. Updates every 30 seconds without refreshing the page." },
+  { title: "Codeless goals and revenue tracking", description: "Turn any page into a goal. Automatically track file downloads, form completions and external link clicks. Set up custom events and revenue tracking.", ddClass: "lg:border-t-0 lg:py-0 lg:pb-4" },
+  { title: "Funnels and user journeys", description: "Measure drop-off across a fixed sequence of steps. Or explore the paths visitors actually take to discover flows you didn't predict." },
+  { title: "Built-in bot filtering", description: "Exclude bots, referrer spam and data center traffic so your stats reflect real human visits, out of the box." },
+];
+
+/* ---------------- Testimonials ---------------- */
+
+export const stats: StatItem[] = [
+  { value: "19k", label: "Paying subscribers" },
+  { value: "260B", label: "Tracked pageviews" },
+  { value: "99.99%", label: "Uptime (Last 90 days)" },
+];
+
+export const testimonials: Testimonial[] = [
+  { name: "Clem Delangue", role: "Co-founder and CEO at Hugging Face", avatar: "/images/ClemDelangue.jpg", href: "https://www.linkedin.com/feed/update/urn:li:activity:7297550772177682434", text: "We’re massive users of Plausible here at Hugging Face." },
+  { name: "DHH", role: "Co-founder and CTO at 37signals", avatar: "/images/dhh.jpg", href: "https://twitter.com/dhh/status/1438785402576506884", text: "Been a very happy customer of Plausible at Basecamp. Wonderful to see domains like web stats that were once a wasteland due to monopoly weight spring new, better options ❤️" },
+  { name: "John O'Nolan", role: "Founder and CEO at Ghost", avatar: "/images/JohnONolan.jpg", href: "https://twitter.com/JohnONolan/status/1488921946062569480", text: "Check out Plausible if you haven't yet - fantastic product. We switched over everything from GA." },
+  { name: "Cyrus Shepard", role: "SEO consultant and former Moz lead", avatar: "/images/cyrusshepard.jpg", href: "https://twitter.com/cyrusshepard/status/1714380470862131344", text: "My 100% favorite GA4 alternative so far is Plausible. Not free and not a ton of bells and whistles, but SOOOO easy to use (for clients too) and the data is near real-time. A good solution for ~70% of websites struggling with GA4." },
+  { name: "Rob Hope", role: "Product designer and founder", avatar: "/images/robhope.jpg", href: "https://twitter.com/robhope/status/1351465826109558784", text: "Just replaced my full network's Google Analytics with Plausible - I can't remember when last I was this impressed by a SaaS UX + design 💯\n\nBecame a paying customer within 1hr of the 30-day trial." },
+  { name: "Laura Roeder", role: "Founder at Paperbell", avatar: "/images/lkr.jpg", href: "https://x.com/lkr/status/1792637010567385355", text: "I've been super happy with Plausible. All the conversion tracking we need, it has every report we use." },
+];
+
+/* ---------------- Story ---------------- */
+
+export interface StorySegment {
+  t?: string;
+  href?: string;
+  cls?: string;
+  br?: boolean;
+}
+export interface StoryBlock {
+  type: "h2" | "h3" | "p";
+  segments: StorySegment[];
+}
+
+export const storyBlocks: StoryBlock[] = [
+  { type: "h2", segments: [{ t: "It's time to ditch Google Analytics" }] },
+  { type: "p", segments: [{ t: " Google Analytics is frustrating to use, difficult to understand, slow to load and privacy-invasive. That's why we built Plausible Analytics, a simple, privacy-first alternative that doesn't cut corners. " }] },
+  { type: "p", segments: [{ t: " Here's what makes Plausible a great " }, { t: "Google Analytics alternative", href: "/vs-google-analytics" }, { t: " and why over 19,000 paying customers trust us with their website and business insights: " }] },
+  { type: "h3", segments: [{ t: "Simple analytics at a glance" }] },
+  { type: "p", segments: [{ t: " Plausible is " }, { t: "simple analytics", href: "/simple-web-analytics" }, { t: ". It is easy to understand and cuts through the noise. Check your site traffic and get the essential insights on one page in one minute. Get an aggregated view of all your sites in a consolidated dashboard. There are no layers of menus and no need to build custom reports, custom dashboards or PowerPoint documents. You can even import your Google Analytics stats. " }] },
+  { type: "h3", segments: [{ t: "Lightweight script that keeps your site speed fast" }] },
+  { type: "p", segments: [{ t: " Plausible is " }, { t: "lightweight analytics", href: "/lightweight-web-analytics" }, { t: ". Our script is 54 times smaller than Google Analytics. Every visitor that loads your site downloads 135KB less JavaScript. Less data transferred means less energy used and less carbon emitted, for every visitor, every day. A site with 100,000 monthly visitors saves around 4 kg of CO2 per year by switching. " }] },
+  { type: "h3", segments: [{ t: "No need for cookie banners or GDPR consent" }] },
+  { type: "p", segments: [{ t: " Plausible is " }, { t: "privacy-friendly analytics", href: "/privacy-focused-web-analytics" }, { t: " that doesn't process personal data or track individual users. No cookies, no persistent identifiers, no cross-site or cross-device tracking. Your site data is not used for any other purposes. All visitor data is exclusively processed on servers owned and operated by European companies and never leaves the EU. " }] },
+  { type: "p", segments: [{ t: " We invite you to take a look around, explore our " }, { t: "live demo", href: "/plausible.io" }, { t: " and " }, { t: "try Plausible", href: "/register" }, { t: " for free. We'd be honored to have you as a customer. Thank you. " }] },
+  { type: "p", segments: [{ t: " Uku and Marko" }, { br: true }, { t: "Co-founders", cls: "text-gray-500" }] },
+  { type: "p", segments: [{ t: " P.S. We're a completely independent, self-funded, bootstrapped and profitable team of 10, running since 2018. No outside investors, no acquisition targets. We choose the subscription business model rather than surveillance capitalism. Our code is open source too, so you're never locked in. Read more " }, { t: "about us", href: "/about" }, { t: ". " }] },
+];
+
+/* ---------------- Pricing ---------------- */
+
+export const pricingVolumes: PricingVolume[] = [
+  { volume: "10k", starter: 9, growth: 14, business: 19 },
+  { volume: "100k", starter: 19, growth: 29, business: 39 },
+  { volume: "200k", starter: 29, growth: 44, business: 59 },
+  { volume: "500k", starter: 49, growth: 74, business: 99 },
+  { volume: "1M", starter: 69, growth: 104, business: 139 },
+  { volume: "2M", starter: 89, growth: 134, business: 179 },
+  { volume: "5M", starter: 129, growth: 194, business: 259 },
+  { volume: "10M", starter: 169, growth: 254, business: 339 },
+];
+
+export const pricingPlans: PricingPlan[] = [
+  { id: "starter", name: "Starter", features: ["One site", "3 years of data retention", "Intuitive, fast and privacy-friendly dashboard", "Email/Slack reports", "Google Analytics import", "Goals and custom events", "Saved Segments", "Annotations"] },
+  { id: "growth", name: "Growth", features: ["Everything in Starter", "Up to 3 sites", "Up to 3 team members", "Team Management", "Shared Links", "Embedded Dashboards", "Shared Segments", "Shared Annotations"] },
+  { id: "business", name: "Business", features: ["Everything in Growth", "Up to 10 sites", "Up to 10 team members", "5 years of data retention", "Custom Properties", "Stats API (600 requests per hour)", "Looker Studio Connector", "Ecommerce revenue attribution", "Funnels and user journeys", "Consolidated View"] },
+  { id: "enterprise", name: "Enterprise", dark: true, features: ["Everything in Business", "10+ sites", "10+ team members", "600+ Stats API requests per hour", "Sites API access", "Single Sign-On (SSO)", "Managed Proxy", "Scheduled raw event data exports", "5+ years of data retention", "Priority support"] },
+];
+
+export const pricingCurrency = "€"; // original geo-detects via /api/paddle/currency; extraction rendered €
+
+/* ---------------- Footer ---------------- */
+
+export const footerColumns: (FooterColumn & { firstMt?: boolean })[] = [
+  {
+    heading: "Why Plausible?",
+    links: [
+      { label: "Simple metrics", href: "/simple-web-analytics" },
+      { label: "Lightweight script", href: "/lightweight-web-analytics" },
+      { label: "Privacy focused", href: "/privacy-focused-web-analytics" },
+      { label: "Open source", href: "/open-source-website-analytics" },
+      { label: "No cookie banner", href: "/cookieless-web-analytics" },
+      { label: "Visitor segmentation", href: "/audience-segmentation" },
+      { label: "Real-time", href: "/real-time-web-analytics" },
+      { label: "Ecommerce", href: "/for-ecommerce" },
+      { label: "SaaS", href: "/for-saas" },
+      { label: "Publishers", href: "/for-bloggers-creators" },
+      { label: "Agencies", href: "/for-freelancers-agencies" },
+      { label: "White label", href: "/white-label-web-analytics" },
+      { label: "Enterprise", href: "/enterprise-web-analytics" },
+    ],
+  },
+  {
+    heading: "Explore",
+    links: [
+      { label: "vs Google Analytics", href: "/vs-google-analytics" },
+      { label: "Migrate from GA4", href: "/migrate-from-google-analytics" },
+      { label: "vs Matomo", href: "/vs-matomo" },
+      { label: "vs Cloudflare", href: "/vs-cloudflare-web-analytics" },
+      { label: "GA4 accuracy", href: "/most-accurate-web-analytics" },
+      { label: "Paid vs free", href: "/paid-analytics-vs-free-ga" },
+      { label: "Right for you?", href: "/when-not-to-use-plausible" },
+      { label: "How to choose", href: "/privacy-friendly-web-analytics" },
+      { label: "WordPress plugin", href: "/wordpress-analytics-plugin" },
+      { label: "Google Tag Manager", href: "/gtm-template" },
+      { label: "Looker Studio", href: "/looker-studio-connector" },
+      { label: "NPM package", href: "https://www.npmjs.com/package/@plausible-analytics/tracker" },
+    ],
+  },
+  {
+    heading: "Resources",
+    links: [
+      { label: "Documentation", href: "/docs" },
+      { label: "Blog", href: "/blog" },
+      { label: "Tools", href: "/tools" },
+      { label: "What's new", href: "/changelog" },
+      { label: "Status", href: "/status", external: true },
+      { label: "GitHub", href: "https://github.com/plausible/analytics", external: true },
+      { label: "X (Twitter)", href: "https://twitter.com/plausiblehq", external: true },
+      { label: "Bluesky", href: "https://bsky.app/profile/plausible.io", external: true },
+      { label: "Mastodon", href: "https://fosstodon.org/@plausible", external: true },
+      { label: "LinkedIn", href: "https://www.linkedin.com/company/plausible-analytics/", external: true },
+    ],
+  },
+  {
+    heading: "Company",
+    firstMt: true,
+    links: [
+      { label: "About", href: "/about" },
+      { label: "Pricing", href: "/#pricing" },
+      { label: "Contact", href: "/contact" },
+      { label: "Privacy policy", href: "/privacy" },
+      { label: "Data policy", href: "/data-policy" },
+      { label: "Terms", href: "/terms" },
+      { label: "DPA", href: "/dpa" },
+      { label: "Security", href: "/security" },
+      { label: "Compliance", href: "/compliance" },
+      { label: "Imprint", href: "/imprint" },
+    ],
+  },
+];

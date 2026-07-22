@@ -5,7 +5,7 @@ alwaysApply: true
 <!-- GENERATED from AGENTS.md by scripts/sync-skills.mjs — edit the source,
      then run: node scripts/sync-skills.mjs -->
 
-# site-cloner
+# ai-site-cloner
 
 Template for cloning any multi-page website into this Next.js codebase, then rebranding it as your own. Two commands drive everything: `/clone-website <url>` and `/restyle`.
 

@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-07-22
+
+Renamed **site-cloner → ai-site-cloner**. Efficiency overhaul driven by measurements from a full plausible.io benchmark run (now in `examples/plausible/`): ~50% less agent-facing artifact surface and a QA phase that costs a handful of page loads on a good clone.
+
+### Added
+
+- `scripts/spec-scaffold.mjs` — generates the mechanical spec sections (frontmatter, DOM, computed styles, assets, text, responsive) straight from extraction JSON; the agent fills only marked judgment blocks. Ends hand-transcription errors
+- `scripts/resolve-walk.mjs` — indexed tree outline + fully resolved styles for any walk node
+- `scripts/compare.mjs` — property-level diff of original vs clone for a failing section, ordered by visual impact (geometry > typography > color), with missing/extra nodes
+- `scripts/diff.mjs --triage` — whole-page diff first per viewport; per-section diffs only for sections overlapping failing bands; scores and `qa_passed` recorded in the manifest automatically
+- `scripts/extract/page.mjs --rename old=new` — rename auto-detected sections (JSONs, probes, screenshots, responsive.json, manifest, spec) with zero page loads
+- `manifest.mjs resume` — one-screen digest: stage table + the exact next commands with real file paths
+- Manifest self-reporting: page.mjs marks `extracted` (and registers sections), lint-spec marks `specd`, diff.mjs records scores + `qa_passed`
+- 640px `-review.png` beside every screenshot for agent judgment work (full-res stays for pixelmatch/builders)
+- Utility-CSS fast path: Tailwind-style sites detected (98.5% on plausible.io); sections carry cleaned source markup and specs quote it as the primary spec
+- `tier: light` spec schema for tiny static sections (≤15 nodes, no states), cross-checked against the walk so it can't be claimed to dodge rigor
+- `examples/plausible/` — full-page original-vs-clone comparisons and the 9-section score table (six sections at 100% across all three viewports)
+
+### Changed
+
+- Section walks stored as `compact-v1`: per-file style dictionary + inherited-prop pruning (fixture: 889KB → 445KB; `--legacy` keeps the old format)
+- State captures are diff-only: header + changed props + appeared/disappeared subtrees with inline styles (368KB → 2.9KB on the fixture's pricing toggle; `--audit` keeps full trees)
+- The state differ aligns children structurally (LCS on tag+classes, then tag) instead of by index — inserted/removed nodes and deep descendant changes are no longer invisible
+- QA serves `npm start` (production build) instead of the dev server; SKILL.md documents the stop→build→restart cycle
+
+### Fixed
+
+- Full-page `-review.png` never wrote (`PNG.sync.read` returns a plain object, not a `PNG` instance)
+- Triage treated zero-height selector matches on the clone as "no overlap" and silently skipped sections
+- Marginal review downscales (768→640) that grew PNG file size are skipped
+
 ## [0.2.0] - 2026-07-21
 
 ### Added
@@ -41,5 +72,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Uploadthing example clone in `examples/`
 - MIT license
 
-[0.2.0]: https://github.com/Mahanaicoach/site-cloner/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/Mahanaicoach/site-cloner/releases/tag/v0.1.0
+[0.3.0]: https://github.com/Mahanaicoach/ai-site-cloner/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/Mahanaicoach/ai-site-cloner/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/Mahanaicoach/ai-site-cloner/releases/tag/v0.1.0

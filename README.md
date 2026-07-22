@@ -1,10 +1,32 @@
-# site-cloner
+# ai-site-cloner
 
-![site-cloner](docs/cover.png)
+![ai-site-cloner](docs/cover.png)
 
-Clone any multi-page website into a clean Next.js codebase with Claude Code — then rebrand it as your own.
+**Point AI at any website. Get a pixel-accurate Next.js clone back — measured, not eyeballed.**
 
-Point it at a URL. `/clone-website` crawls the site, measures everything with scripted Playwright extraction (no eyeballing), writes auditable component specs, dispatches parallel builder agents in git worktrees, and loops a scored pixel-diff QA at phone/iPad/PC widths until every section passes. Then `/restyle` swaps in your brand — colors, fonts, logo, copy — without touching the cloned layout.
+`/clone-website` turns Claude Code (or Cursor, Copilot, Gemini CLI — 12 tools supported) into a full cloning pipeline: it crawls the site, extracts every computed style with scripted Playwright measurement, generates auditable component specs, dispatches parallel builder agents in git worktrees, and loops a scored pixel-diff QA at phone/tablet/desktop widths until every section clears 95%. Then `/restyle` swaps in your own brand — colors, fonts, logo, copy — without touching the cloned layout.
+
+Screenshot-to-code tools guess. This one measures.
+
+## Proof: plausible.io, cloned
+
+Original on the left. AI clone on the right.
+
+![original vs clone](examples/plausible/comparison.png)
+
+9 sections × 3 viewports, scored by pixelmatch against the live site: **6 of 9 sections hit 100% on every viewport**, nothing below 97.5%. That includes the working nav dropdowns, the mobile menu overlay, and the 9-tier pricing slider with its monthly/yearly toggle and recomputing prices.
+
+| Section | PC | iPad | Phone |  | Section | PC | iPad | Phone |
+|---|---|---|---|---|---|---|---|---|
+| hero | 100% | 100% | 100% |  | story | 99.98% | 99.97% | 100% |
+| dashboard | 100% | 100% | 100% |  | nav | 99.2% | 98.8% | 100% |
+| features | 100% | 100% | 100% |  | cta | 99.6% | 99.3% | 100% |
+| testimonials | 100% | 100% | 100% |  | footer | 100% | 97.7% | 100% |
+| pricing | 100% | 100% | 97.5% |  |  |  |  |  |
+
+Full-page and phone side-by-sides, the data file, and how the run went: [`examples/plausible/`](examples/plausible/)
+
+**Second example:** [`examples/uploadthing/`](examples/uploadthing/) — its hero artwork is painted on a `<canvas>`, normally unclonable since there's no DOM to copy. The pipeline records it via `canvas.captureStream()` and embeds a looping video, so the clone keeps the artwork *and* its motion.
 
 ## Quick Start
 
@@ -26,38 +48,34 @@ Point it at a URL. `/clone-website` crawls the site, measures everything with sc
    /restyle
    ```
 
-## What's Better Than Eyeball Cloning
-
-| Problem | Solution here |
-|---|---|
-| Agent guesses CSS values from screenshots | `scripts/extract/section.mjs` — full `getComputedStyle()` DOM walk, exact values (stored compact; `resolve-walk.mjs` reads any node) |
-| Responsive behavior guessed from desktop | `scripts/extract/responsive.mjs` — measures real column counts at 390/768/1440px |
-| "Looks close enough" QA | `scripts/diff.mjs` — pixel-diff score per section per viewport; 95% threshold to pass; `--triage` diffs the whole page first and touches only sections in failing bands |
-| QA says WHERE but not WHAT | `scripts/compare.mjs` — walks original + clone, prints the differing computed properties ordered by visual impact |
-| Agent mis-transcribes values into specs | `scripts/spec-scaffold.mjs` — mechanical spec sections generated straight from the extraction JSON (utility-CSS sites quote the markup itself) |
-| Incomplete specs slip through | `scripts/lint-spec.mjs` — mechanical completeness gate before any builder runs |
-| Long runs die and restart from zero | `docs/research/manifest.json` — scripts self-report their stage transitions; `manifest.mjs resume` prints the exact next commands |
-| Single-page only | `scripts/extract/crawl.mjs` — sitemap + nav discovery, shared header/footer extracted once |
-| Clone is a dead-end copy | Content in `src/data/*.ts` + `/restyle` skill = rebrand without breaking layout |
-
-## Example
-
-[`examples/uploadthing/`](examples/uploadthing/) is a real end-to-end run against **uploadthing.com** — side-by-side screenshots, the per-viewport score table (96–99.8% per section), and the tooling bugs that run exposed and fixed.
-
-![original vs clone](examples/uploadthing/comparison.png)
-
-Its hero illustration is painted on a `<canvas>` — normally unclonable, since there's no DOM to copy. The pipeline records it through `canvas.captureStream()` and embeds a looping video, so the clone keeps the artwork *and* its motion.
-
-## Pipeline
+## How it works
 
 ```
 Phase 0  Crawl        sitemap + nav discovery → you confirm the page list
 Phase 1  Recon        tokens, assets, screenshots, responsive measurements, interaction sweep
 Phase 2  Foundation   fonts, color tokens, types, extracted SVG icons, shared header/footer
-Phase 3  Sections     extract → spec file → lint gate → parallel builders in worktrees → merge
+Phase 3  Sections     extract → spec scaffolded from JSON → lint gate → parallel builders in worktrees → merge
 Phase 4  Assembly     one route per page, data wired to components
-Phase 5  QA loop      pixel-diff every section × 3 viewports until ≥95% match
+Phase 5  QA loop      whole-page triage first, then pixel-diff failing sections × 3 viewports until ≥95%
 ```
+
+The AI never invents a value. Every number a builder uses — font sizes, padding, colors, column counts, hover states, transition durations — comes from a script that measured the live page. Specs are generated from that JSON, a linter blocks incomplete ones, and the pixel score decides when a section is done.
+
+## Why this beats screenshot-to-code
+
+| Problem with "look at a screenshot and code it" | What happens here instead |
+|---|---|
+| AI guesses CSS values from pixels | `scripts/extract/section.mjs` — full `getComputedStyle()` DOM walk, exact values (stored compact; `resolve-walk.mjs` reads any node) |
+| Responsive behavior guessed from desktop | `scripts/extract/responsive.mjs` — real column counts and font steps measured at 390/768/1440px |
+| Only the default state gets cloned | `--state` captures diff the DOM before/after every click/hover/scroll — dropdowns, toggles, tab panels, with the appeared nodes and their styles |
+| "Looks close enough" QA | `scripts/diff.mjs` — pixel-diff score per section per viewport, 95% to pass; `--triage` diffs the whole page first and touches only sections in failing bands |
+| QA says WHERE but not WHAT | `scripts/compare.mjs` — walks original + clone, prints the differing computed properties ordered by visual impact |
+| AI mis-transcribes values into specs | `scripts/spec-scaffold.mjs` — mechanical spec sections generated straight from the extraction JSON (Tailwind sites quote the source markup itself) |
+| Incomplete specs slip through | `scripts/lint-spec.mjs` — mechanical completeness gate before any builder runs |
+| Long runs die and restart from zero | `docs/research/manifest.json` — scripts self-report their stage transitions; `manifest.mjs resume` prints the exact next commands |
+| Single-page only | `scripts/extract/crawl.mjs` — sitemap + nav discovery, shared header/footer extracted once |
+| `<canvas>` artwork is unclonable | `scripts/extract/canvas.mjs` — records it with `captureStream()`, embeds a looping video |
+| Clone is a dead-end copy | Content lives in `src/data/*.ts` + the `/restyle` skill = rebrand without breaking layout |
 
 ## Scripts
 
@@ -111,7 +129,7 @@ Requires Node 22+ (auto via `.nvmrc`).
 
 Platform migration of sites you own · recovering lost source code · learning how production sites are built.
 
-**Not for** phishing, impersonation, or passing off someone else's design as your own. Check a site's terms before cloning it.
+**Not for** phishing, impersonation, or passing off someone else's design as your own. Check a site's terms before cloning it. The example clones in this repo (plausible.io, uploadthing.com) are technical demonstrations — don't republish anyone's brand.
 
 ## License
 
