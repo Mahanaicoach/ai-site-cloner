@@ -19,7 +19,7 @@ Template for cloning any multi-page website into this Next.js codebase, then reb
 - **Content lives in `src/data/*.ts`, never hardcoded in components.** Components take props. This is what makes `/restyle` possible — copy swaps without touching layout.
 - Pages: `src/app/<route>/page.tsx` wires data → components. Shared header/footer mount in layouts.
 - `docs/research/` holds extraction artifacts (JSON, specs, manifest) — auditable, never hand-edited except spec files.
-- `docs/research/manifest.json` is the pipeline state. Update it at every stage transition; check it first on any clone-related task (`node scripts/manifest.mjs status`).
+- `docs/research/manifest.json` is the pipeline state. The extraction/spec/QA scripts self-report their stage transitions; update `built`/`merged` manually. Check it first on any clone-related task (`node scripts/manifest.mjs status`).
 - Specs (`docs/research/components/**/*.spec.md`) must pass `node scripts/lint-spec.mjs` before any builder agent is dispatched.
 - All extraction numbers come from `scripts/` (computed styles, real column counts, pixel diffs) — never estimated by eye.
 

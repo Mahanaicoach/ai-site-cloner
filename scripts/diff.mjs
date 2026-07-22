@@ -47,6 +47,7 @@ import {
   parseArgs,
   toList,
 } from "./lib.mjs";
+import { selfReport, findPage, findSection, advanceStage, updatePageStatus } from "./manifest-lib.mjs";
 
 const args = parseArgs(process.argv.slice(2));
 
@@ -280,6 +281,38 @@ if (args.original && args.clone) {
       }
     }
     output = { route: args.route && args.route !== true ? args.route : null, sections: sectionResults };
+
+    // A --route sweep IS the QA measurement — record per-viewport scores in the
+    // manifest and advance sections whose three viewports all clear the
+    // threshold to qa_passed, instead of leaving that to a separate command.
+    if (output.route) {
+      const qaThreshold = args.threshold ? Number(args.threshold) : 95;
+      let scored = 0, passed = 0;
+      selfReport((m) => {
+        const p = findPage(m, output.route);
+        if (!p) return false;
+        let changed = false;
+        for (const s of sections) {
+          const sec = findSection(p, s.name);
+          if (!sec) continue;
+          for (const vp of vpNames) {
+            const r = sectionResults[s.name].viewports[vp];
+            if (r && !r.error) {
+              sec.scores[vp] = r.match;
+              changed = true;
+              scored++;
+            }
+          }
+          if (["pc", "ipad", "phone"].every((v) => typeof sec.scores[v] === "number" && sec.scores[v] >= qaThreshold)) {
+            if (advanceStage(sec, "qa_passed")) passed++;
+            changed = true;
+          }
+        }
+        if (changed) updatePageStatus(p);
+        return changed;
+      });
+      if (scored) console.error(`  ✓ manifest: ${scored} score(s) recorded${passed ? `, ${passed} section(s) → qa_passed` : ""}`);
+    }
   } else {
     // Single live mode.
     const name = args.name || slugify(args.selector || "page");

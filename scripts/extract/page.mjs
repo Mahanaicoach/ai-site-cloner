@@ -60,6 +60,7 @@ import {
   nameFromSelector,
 } from "./collectors.mjs";
 import { compactWalk, toLegacy } from "./walk-format.mjs";
+import { selfReport, findPage, findSection, advanceStage, updatePageStatus, routeOfUrl } from "../manifest-lib.mjs";
 
 const t0 = Date.now();
 const args = parseArgs(process.argv.slice(2));
@@ -245,6 +246,32 @@ for (const s of sections) {
   } else {
     const { tree, styleTable } = compactWalk(walk);
     writeJson(`docs/research/${host}/sections/${s.name}.json`, { ...base, format: "compact-v1", tree, styleTable });
+  }
+}
+
+// Self-report: the walks above ARE the extraction, so the script does its own
+// bookkeeping — registering any section the manifest doesn't know yet and
+// advancing known ones to `extracted`. No manifest (or untracked route) = no-op.
+{
+  let registered = 0, advanced = 0;
+  selfReport((m) => {
+    const p = findPage(m, routeOfUrl(url));
+    if (!p) return false;
+    for (const s of sections) {
+      if (walks[s.selector]?.error) continue;
+      let sec = findSection(p, s.name);
+      if (!sec) {
+        sec = { name: s.name, selector: s.selector, stage: "discovered", spec: null, component: null, scores: {} };
+        p.sections.push(sec);
+        registered++;
+      }
+      if (advanceStage(sec, "extracted")) advanced++;
+    }
+    if (registered || advanced) updatePageStatus(p);
+    return registered || advanced;
+  });
+  if (registered || advanced) {
+    console.error(`  ✓ manifest: ${advanced} section(s) marked extracted${registered ? `, ${registered} newly registered` : ""}`);
   }
 }
 

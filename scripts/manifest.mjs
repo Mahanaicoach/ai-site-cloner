@@ -13,29 +13,23 @@
 //   node scripts/manifest.mjs set --route / --section hero --score pc=96.2
 //   node scripts/manifest.mjs status
 //   node scripts/manifest.mjs next
-import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { parseArgs, CACHE_DIR } from "./lib.mjs";
-
-const FILE = "docs/research/manifest.json";
-const STAGES = ["discovered", "extracted", "specd", "built", "merged", "qa_passed"];
+import { MANIFEST_FILE as FILE, STAGES, loadManifest, saveManifest as save, findPage as findPageIn } from "./manifest-lib.mjs";
 
 const [cmd, ...rest] = process.argv.slice(2);
 const args = parseArgs(rest);
 
 const load = () => {
-  if (!existsSync(FILE)) {
+  const m = loadManifest();
+  if (!m) {
     console.error(`No manifest at ${FILE} — run: node scripts/manifest.mjs init <url>`);
     process.exit(1);
   }
-  return JSON.parse(readFileSync(FILE, "utf8"));
-};
-const save = (m) => {
-  m.updatedAt = new Date().toISOString();
-  mkdirSync("docs/research", { recursive: true });
-  writeFileSync(FILE, JSON.stringify(m, null, 2) + "\n");
+  return m;
 };
 const findPage = (m, route) => {
-  const p = m.pages.find((p) => p.route === route);
+  const p = findPageIn(m, route);
   if (!p) {
     console.error(`Page not found: ${route}. Pages: ${m.pages.map((p) => p.route).join(", ") || "(none)"}`);
     process.exit(1);

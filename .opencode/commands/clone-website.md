@@ -64,7 +64,7 @@ The scripts are plain Node CLIs — any coding agent can run them. Playwright's 
 8. **The extraction JSON is ground truth; the spec is a summary of it.** If a builder finds the spec disagreeing with `sections/<name>.json` or `responsive.json`, the JSON wins — say so explicitly in every builder prompt and have the builder report the discrepancy so you can correct the spec.
 9. **Spec files are the contract.** No spec → no builder. lint-spec must pass → then dispatch.
 10. **The build must always compile.** Builders verify `npx tsc --noEmit`; you verify `npm run typecheck && npm run lint` after every merge. Full `npm run build` runs only at checkpoints (Phase 0, end of Phase 2, once mid-way through Phase 3, Phase 4, completion) — it takes 30–60s and running it per merge serializes otherwise-parallel builders.
-11. **The manifest is updated at every stage transition.** That's what makes the run resumable.
+11. **The manifest tracks every stage transition.** The scripts self-report the transitions they own — page.mjs marks `extracted` (and registers new sections), lint-spec marks `specd` on pass, diff.mjs `--route` sweeps record scores and `qa_passed`. You update only the stages no script can see: `built` and `merged` (via `manifest.mjs set`), which also remains the manual override for anything else.
 
 ## Phase 0 — Crawl & Scope
 
@@ -136,7 +136,7 @@ panels land there. Pass `--audit` to also store the full before/after trees. Cro
 `interactiveStates` — a :hover rule in the stylesheet with no captured state means
 the extraction is not done.
 
-Mark: `manifest.mjs set --route <r> --section <name> --stage extracted`
+(No manifest command needed — page.mjs already marked the section `extracted` when it wrote the walk.)
 
 ### 3b. Write the spec — scaffold first, judgment second
 
@@ -165,7 +165,7 @@ the page — don't restyle it.
 ```bash
 node scripts/lint-spec.mjs docs/research/components/<route-slug>/<name>.spec.md
 ```
-Fails → extract more. Passes → `manifest.mjs set … --stage specd` and dispatch.
+Fails → extract more. Passes → dispatch (lint-spec records the `specd` stage in the manifest itself).
 
 ### 3d. Dispatch builder agent (worktree)
 
@@ -194,8 +194,11 @@ Start the clone: `npm run dev` (background). Then **score the whole page's secti
 
 ```bash
 node scripts/diff.mjs --original <orig-page-url> --clone http://localhost:3000<route> --route <r> --viewport all
-node scripts/manifest.mjs set --route <r> --section <name> --score pc=<match>   # per section × viewport
 ```
+
+The `--route` sweep records every score in the manifest itself and advances
+sections whose three viewports all clear 95% to `qa_passed` — no separate
+manifest commands during QA.
 
 **Fix iterations stay single-section** — the original-side shots captured by the sweep are cached, so a re-diff only re-renders the clone:
 
@@ -203,7 +206,7 @@ node scripts/manifest.mjs set --route <r> --section <name> --score pc=<match>   
 node scripts/diff.mjs --original <orig-page-url> --clone http://localhost:3000<route> --selector "<sel>" --viewport all --name <name>
 ```
 
-- **Pass = ≥95% on all three viewports** → `--stage qa_passed`
+- **Pass = ≥95% on all three viewports** (diff.mjs sets `qa_passed` automatically on a `--route` sweep)
 - Below 95% → **read the band breakdown first**: it names the y-range where the mismatch lives, so you inspect that band of the diff image in `docs/research/qa/` (open the `-review.png` copy diff.mjs writes for failing sections) instead of eyeballing the whole section. Then check the spec (wrong extraction → re-extract and fix; right spec, wrong build → fix component), re-diff
 - A large height mismatch reported by diff.mjs = missing content or wrong spacing — fix before pixel-tweaking
 - Max 3 fix iterations per section, then record the gap honestly and move on
@@ -222,7 +225,7 @@ Whole-page diffs (`--selector` omitted) at all 3 viewports close out each page.
 - **Don't approximate ("looks like text-lg").** Use the walker's exact computed values; use arbitrary values (`text-[17px]`) when Tailwind's scale doesn't match.
 - **Don't dispatch a builder without a lint-passing spec.** No exceptions — that's the whole quality model.
 - **Don't reference docs from builder prompts** — spec contents go inline.
-- **Don't skip the manifest updates.** An untracked run can't resume.
+- **Don't skip the `built`/`merged` manifest updates.** Extraction, spec and QA stages self-report, but no script can see a merge — an untracked run can't resume.
 - **Don't hardcode content in components.** Content → `src/data/`, components take props.
 - **Don't write "same as desktop" in a Responsive section.** Root font-size steps at breakpoints on most real sites, so every number changes. Run `probe.mjs` and write the real values for all three widths — lint-spec now rejects vague responsive sections.
 - **Don't forget `::before` / `::after`.** They carry hero overlays, heading underline bars, and icon glyphs. `section.mjs` captures them under a `pseudo` key — if a spec has none and the screenshot shows decorations, extraction was incomplete.

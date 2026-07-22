@@ -6,7 +6,8 @@
 //        node scripts/lint-spec.mjs docs/research/components   (lints every *.spec.md inside)
 // Exit 1 if any spec fails.
 import { readFileSync, statSync, readdirSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, basename, dirname, relative, isAbsolute } from "node:path";
+import { selfReport, findPage, findSection, advanceStage } from "./manifest-lib.mjs";
 
 const REQUIRED_FRONTMATTER = ["component", "target", "page", "screenshot", "interaction_model", "states", "assets", "responsive"];
 const INTERACTION_MODELS = ["static", "click-driven", "scroll-driven", "hover-driven", "time-driven", "mixed"];
@@ -142,8 +143,33 @@ for (const file of files) {
     errors.forEach((e) => console.log(`    ERROR: ${e}`));
   } else {
     console.log(`✓ ${file}`);
+    markSpecd(file);
   }
   warnings.forEach((w) => console.log(`    warn: ${w}`));
+}
+
+// A passing lint IS the "specd" stage transition — report it to the manifest
+// instead of relying on a separate agent command. Spec paths follow
+// components/<route-slug>/<name>.spec.md; when the slug doesn't invert to a
+// route cleanly (nested routes), fall back to the unique section name.
+function markSpecd(file) {
+  const name = basename(file).replace(/\.spec\.md$/, "");
+  const slug = basename(dirname(file));
+  const specPath = isAbsolute(file) ? relative(process.cwd(), file) : file;
+  const reported = selfReport((m) => {
+    let page = findPage(m, slug === "home" ? "/" : `/${slug}`);
+    let sec = findSection(page, name);
+    if (!sec) {
+      const hits = m.pages.flatMap((p) => p.sections.filter((s) => s.name === name).map((s) => [p, s]));
+      if (hits.length === 1) [page, sec] = hits[0];
+    }
+    if (!sec) return false;
+    const advanced = advanceStage(sec, "specd");
+    const pathChanged = sec.spec !== specPath;
+    sec.spec = specPath;
+    return advanced || pathChanged;
+  });
+  if (reported) console.log(`    manifest: ${name} → specd`);
 }
 
 console.log(`\n${files.length - failed}/${files.length} specs pass`);
