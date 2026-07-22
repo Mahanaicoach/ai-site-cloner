@@ -1,0 +1,52 @@
+name: Feature Request
+description: Suggest a new feature or improvement
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting a feature! Describe the problem first, then your proposed solution.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What problem does this solve? What's missing or frustrating today?
+      placeholder: "Cloning breaks down when the target site..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: How would you like this to work?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Any other approaches you've thought about?
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      options:
+        - Extraction scripts (crawl, recon, assets, CSS)
+        - Cloning pipeline / skills (/clone-website, /restyle)
+        - QA / pixel diff scoring
+        - Agent tool support (Cursor, Copilot, etc.)
+        - Docker / deployment
+        - Documentation
+        - Developer experience
+        - Other
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Example sites, screenshots, links, or any other context.

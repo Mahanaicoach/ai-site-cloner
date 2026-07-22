@@ -1,6 +1,7 @@
 // Shared helpers for all extraction/QA scripts.
 import { chromium } from "playwright";
 import { PNG } from "pngjs";
+import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync, readFileSync, renameSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
@@ -179,8 +180,24 @@ async function enableResponseCache(context) {
   });
 }
 
+// Launch Chromium, installing it on the fly if this is a fresh checkout.
+// "npx playwright install chromium" as a manual first step is exactly the kind
+// of setup friction that makes a template feel broken — the error Playwright
+// throws names the fix, so apply it automatically and retry once.
+async function launchInstallingIfMissing() {
+  try {
+    return await chromium.launch({ headless: true });
+  } catch (err) {
+    if (!/playwright install|Executable doesn't exist/i.test(String(err?.message))) throw err;
+    console.error("  Chromium not installed — running `npx playwright install chromium` (one-time)…");
+    const r = spawnSync("npx", ["playwright", "install", "chromium"], { stdio: "inherit" });
+    if (r.status !== 0) throw err;
+    return chromium.launch({ headless: true });
+  }
+}
+
 export function getBrowser() {
-  if (!_browserPromise) _browserPromise = chromium.launch({ headless: true });
+  if (!_browserPromise) _browserPromise = launchInstallingIfMissing();
   return _browserPromise;
 }
 

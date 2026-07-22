@@ -1,0 +1,111 @@
+name: Bug Report
+description: Report a bug or unexpected behavior
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug! Fill out the form below so we can reproduce and fix it.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear description of what went wrong.
+      placeholder: What happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Step-by-step instructions to reproduce the behavior.
+      placeholder: |
+        1. Run `/clone-website https://example.com`
+        2. Extraction finishes, builder agents start
+        3. See error in terminal...
+    validations:
+      required: true
+
+  - type: input
+    id: target-url
+    attributes:
+      label: Target URL
+      description: The website you were cloning when the bug happened (if applicable).
+      placeholder: https://example.com
+
+  - type: dropdown
+    id: phase
+    attributes:
+      label: Script / Phase That Failed
+      description: Where in the pipeline did it break?
+      options:
+        - Crawl / route discovery (crawl.mjs)
+        - Page recon / extraction (page.mjs, collectors.mjs)
+        - Asset download (assets.mjs)
+        - Spec writing / spec lint (lint-spec.mjs)
+        - Builder agents (component build)
+        - QA / pixel diff (diff.mjs)
+        - Restyle (/restyle)
+        - Next.js app itself (dev/build/runtime)
+        - Docker (build or compose)
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: input
+    id: qa-score
+    attributes:
+      label: QA Score (if relevant)
+      description: The score reported by the QA diff, if the bug is about visual accuracy.
+      placeholder: e.g. 62/100 on /about at 1440px
+
+  - type: dropdown
+    id: agent-tool
+    attributes:
+      label: Agent Tool Used
+      description: Which AI coding tool were you running the skills with?
+      options:
+        - Claude Code
+        - Cursor
+        - Windsurf
+        - GitHub Copilot
+        - Codex CLI
+        - Gemini CLI
+        - Cline / Roo Code
+        - Continue
+        - Amazon Q
+        - Augment Code
+        - OpenCode
+        - Aider
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      options:
+        - macOS
+        - Windows
+        - Linux
+    validations:
+      required: true
+
+  - type: input
+    id: node-version
+    attributes:
+      label: Node.js Version
+      description: Run `node -v` to find this.
+      placeholder: v22.x.x
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Error output, `docs/research/manifest.json` state, screenshots — anything that helps.

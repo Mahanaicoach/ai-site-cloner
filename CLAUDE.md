@@ -7,7 +7,7 @@ Template for cloning any multi-page website into this Next.js codebase, then reb
 - **Next.js 16** — App Router, React 19, TypeScript strict
 - **Tailwind CSS v4** + shadcn/ui (base-ui primitives), oklch tokens in `src/app/globals.css`
 - **Lucide React** icons (replaced by extracted SVGs in `src/components/icons.tsx` during cloning)
-- **Playwright** (devDependency) powers all extraction/QA scripts — first run needs `npx playwright install chromium`
+- **Playwright** (devDependency) powers all extraction/QA scripts — Chromium auto-installs on the first script run (`npm run setup` to do it explicitly)
 
 ## Commands
 

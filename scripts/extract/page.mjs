@@ -118,8 +118,11 @@ const [signatures, walks, tokens, css, assetsFound] = await Promise.all([
 const meta = { url, generatedAt: new Date().toISOString() };
 if (tokens) writeJson(`docs/research/${host}/tokens.json`, { ...meta, ...tokens });
 if (css) {
-  const { interactiveCount, blockedCount, ...cssOut } = css;
-  writeJson(`docs/research/${host}/css.json`, { ...meta, ...cssOut });
+  // interactiveCount/blockedCount are stdout-summary fields, not research data
+  const cssOut = { ...meta, ...css };
+  delete cssOut.interactiveCount;
+  delete cssOut.blockedCount;
+  writeJson(`docs/research/${host}/css.json`, cssOut);
 }
 writeJson(`docs/research/${host}/responsive.json`, {
   ...meta,

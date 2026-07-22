@@ -1,0 +1,21 @@
+# Dev image: runs `next dev` AND the Playwright extraction/QA scripts.
+#
+# Base image ships Chromium + all system deps preinstalled (PLAYWRIGHT_BROWSERS_PATH
+# is set by the image, so `npx playwright install chromium` is NOT needed here).
+# IMPORTANT: keep this tag in sync with the "playwright" version in package.json
+# devDependencies — mismatched versions look for missing browser builds.
+FROM mcr.microsoft.com/playwright:v1.61.1-noble
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
+
+# Source files are mounted as a volume at runtime for hot reload
+
+EXPOSE 3000
+
+ENV NODE_ENV=development
+ENV NEXT_TELEMETRY_DISABLED=1
+
+CMD ["npm", "run", "dev"]

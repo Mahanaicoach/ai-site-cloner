@@ -11,8 +11,7 @@ Point it at a URL. `/clone-website` crawls the site, measures everything with sc
 1. Create your own repository from this template (**Use this template** on GitHub), then clone it.
 2. Install:
    ```bash
-   npm install
-   npx playwright install chromium
+   npm install   # Chromium auto-installs on the first extraction run (or: npm run setup)
    ```
 3. Start Claude Code (Chrome integration recommended for interaction discovery):
    ```bash
@@ -63,25 +62,39 @@ Phase 5  QA loop      pixel-diff every section × 3 viewports until ≥95% match
 All plain Playwright — run standalone, no MCP needed:
 
 ```bash
+node scripts/extract/page.mjs <url>                    # ONE-SHOT recon: tokens, css, assets, responsive,
+                                                       #   section walks + every screenshot — 3 page loads, ~15s
 node scripts/extract/crawl.mjs <url> [--max 25]        # discover pages
-node scripts/extract/tokens.mjs <url>                  # colors, fonts, CSS vars
-node scripts/extract/assets.mjs <url>                  # download all images/videos/SVGs/fonts
-node scripts/extract/section.mjs <url> --selector "x"  # computed styles (+ --state for hover/scroll/click diffs)
-node scripts/extract/screenshot.mjs <url>              # phone/iPad/PC screenshots
-node scripts/extract/responsive.mjs <url>              # real layout changes across viewports
+node scripts/extract/section.mjs <url> --selector "x" --state hover:".card"   # hover/scroll/click state diffs
 node scripts/extract/probe.mjs <url> --selector "x"    # per-viewport value table for specs
-node scripts/extract/css.mjs <url>                     # real :hover/:focus rules + breakpoints from the stylesheets
 node scripts/extract/canvas.mjs <url>                  # capture <canvas> artwork as video/PNG
-node scripts/diff.mjs --original <url> --clone <url>   # scored pixel diff
+node scripts/extract/tokens.mjs / css.mjs / assets.mjs / responsive.mjs / screenshot.mjs   # single-purpose re-runs
+node scripts/diff.mjs --original <url> --clone <url> --viewport all   # scored pixel diff, all 3 viewports in one
+                                                       #   call; 10-band breakdown names WHERE it mismatches
 node scripts/lint-spec.mjs docs/research/components    # spec completeness gate
 node scripts/manifest.mjs status                       # pipeline state / resume point
+```
+
+## Supported agents
+
+The two skills are written once in `.claude/skills/` and synced to every other tool's native format (`node scripts/sync-skills.mjs`; CI fails if generated configs go stale):
+
+**Claude Code** (native) · **Cursor** · **Windsurf** · **GitHub Copilot** · **Gemini CLI** · **Amazon Q** · **Codex** · **Cline** · **Continue** · **opencode** · **Augment** · **Aider** — plus a generic [`AGENTS.md`](AGENTS.md) that most other tools pick up automatically.
+
+The extraction scripts are plain Node CLIs, so any agent can run them. Tools without subagent/worktree support build sections sequentially from the same lint-gated specs — every quality gate still applies.
+
+## Docker
+
+```bash
+docker compose up dev    # dev server on :3000, Playwright preinstalled (extraction works in-container)
+docker compose up app    # production: slim standalone build of the finished clone
 ```
 
 ## Stack
 
 Next.js 16 (App Router, React 19, TS strict) · Tailwind CSS v4 · shadcn/ui · Playwright + pixelmatch (dev)
 
-Requires Node 22+.
+Requires Node 22+ (auto via `.nvmrc`).
 
 ## Intended Use
 

@@ -1,0 +1,58 @@
+services:
+  # Production: serves the finished clone (slim standalone build, no Playwright)
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runner
+    image: site-cloner:latest
+    container_name: site-cloner
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXT_TELEMETRY_DISABLED=1
+    env_file:
+      - path: .env.local
+        required: false
+      - path: .env
+        required: false
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Dev: `next dev` + Playwright Chromium for the extraction/QA scripts.
+  # Source is bind-mounted for hot reload; node_modules and .next stay in-container.
+  # Both services default to port 3000 — start one at a time
+  # (`docker compose up dev` or `docker compose up app`), or set DEV_PORT.
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    image: site-cloner:dev
+    container_name: site-cloner-dev
+    restart: unless-stopped
+    ports:
+      - "${DEV_PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=development
+      - NEXT_TELEMETRY_DISABLED=1
+    env_file:
+      - path: .env.local
+        required: false
+      - path: .env
+        required: false
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s

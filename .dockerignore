@@ -1,0 +1,70 @@
+# Dependencies (reinstalled inside Docker)
+node_modules
+npm-debug.log*
+yarn-debug.log*
+
+# Build output
+.next
+out
+build
+dist
+*.tsbuildinfo
+
+# Git / GitHub
+.git
+.gitignore
+.github
+
+# Environment files (pass via docker-compose env_file or runtime env vars)
+.env
+.env.local
+.env.*.local
+
+# Editor / OS
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Agent / AI tool configs (not needed at build or runtime)
+.claude
+.codex
+.cursor
+.windsurf
+.gemini
+.continue
+.amazonq
+.augment
+.opencode
+.aider.conf.yml
+.clinerules
+.windsurfrules
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+.github/copilot-instructions.md
+
+# Extraction artifacts and reference material (dev-time only, can be large)
+docs/research
+docs/design-references
+examples
+
+# Extraction/QA scripts (dev container bind-mounts the repo, so it still sees them)
+scripts
+
+# NOTE: public/ is intentionally NOT excluded — the cloned site's downloaded
+# assets (images, fonts, videos) live there and must ship with the build.
+
+# Docker files themselves
+Dockerfile
+Dockerfile.dev
+docker-compose.yml
+.dockerignore
+
+# Repo meta (not needed inside the image)
+README.md
+CHANGELOG.md
+LICENSE
+BRAND.md

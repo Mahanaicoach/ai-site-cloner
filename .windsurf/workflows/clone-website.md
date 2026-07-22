@@ -1,13 +1,9 @@
----
-name: clone-website
-description: Reverse-engineer and clone a full multi-page website into this Next.js codebase — crawls pages, runs scripted extraction (tokens, assets, computed styles, responsive layout at phone/iPad/PC), writes auditable component specs, dispatches parallel builder agents in worktrees, and loops a scored pixel-diff QA until every section passes. Use whenever the user wants to clone, replicate, rebuild, reverse-engineer, or copy any website. Resumable — safe to re-run after an interruption.
-argument-hint: "<url> [extra instructions]"
-user-invocable: true
----
+<!-- GENERATED from .claude/skills/clone-website/SKILL.md by scripts/sync-skills.mjs — edit the source,
+     then run: node scripts/sync-skills.mjs -->
 
 # Clone Website
 
-Reverse-engineer and rebuild **$ARGUMENTS** as a pixel-accurate, multi-page Next.js clone.
+Reverse-engineer and rebuild **the target URL (plus any extra instructions) provided by the user** as a pixel-accurate, multi-page Next.js clone.
 
 You are a **foreman walking the job site**: scripts do the measuring, you do the judgment, specs are the contract, builder agents do the construction, and the pixel-diff score decides when you're done. Extraction and construction overlap — dispatch builders as soon as a section's spec passes lint, then keep extracting.
 

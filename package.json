@@ -1,10 +1,18 @@
 {
   "name": "site-cloner",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Clone any multi-page website into a clean Next.js codebase with Claude Code — scripted extraction, spec-driven parallel builds, and scored visual QA",
   "author": "Mahanaicoach",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Mahanaicoach/site-cloner.git"
+  },
+  "homepage": "https://github.com/Mahanaicoach/site-cloner#readme",
+  "bugs": {
+    "url": "https://github.com/Mahanaicoach/site-cloner/issues"
+  },
   "engines": {
     "node": ">=22"
   },
@@ -14,7 +22,8 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "check": "npm run lint && npm run typecheck && npm run build"
+    "check": "npm run lint && npm run typecheck && npm run build",
+    "setup": "playwright install chromium"
   },
   "dependencies": {
     "@base-ui/react": "^1.3.0",
