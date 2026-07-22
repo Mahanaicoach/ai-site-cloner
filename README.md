@@ -65,14 +65,16 @@ Net effect: the agent-facing surface of a full plausible-sized run fits in about
 
 ## How it works
 
-```
-Phase 0  Crawl        sitemap + nav discovery → you confirm the page list
-Phase 1  Recon        tokens, assets, screenshots, responsive measurements, interaction sweep
-Phase 2  Foundation   fonts, color tokens, types, extracted SVG icons, shared header/footer
-Phase 3  Sections     extract → spec scaffolded from JSON → lint gate → parallel builders in worktrees → merge
-Phase 4  Assembly     one route per page, data wired to components
-Phase 5  QA loop      whole-page triage first, then pixel-diff failing sections × 3 viewports until ≥95%
-```
+**Crawl → Recon → Foundation → Sections → Assembly → QA loop** — six phases, one command, resumable at any point.
+
+| | Phase | What happens |
+|:---:|---|---|
+| 🕸️ | **0 · Crawl** | Sitemap + nav discovery. You confirm the page list — that's the only question it asks. |
+| 📐 | **1 · Recon** | One command per page: design tokens, every asset downloaded, computed-style walks, responsive measurements at 390/768/1440px, screenshots, interaction sweep. Three page loads, ~15 seconds. |
+| 🎨 | **2 · Foundation** | Fonts, color tokens, TypeScript types, extracted SVG icons, shared header/footer. |
+| 🧱 | **3 · Sections** | Spec scaffolded from the extraction JSON → AI fills the judgment blocks → lint gate → parallel builder agents in git worktrees → merge. |
+| 🧩 | **4 · Assembly** | One route per page, content wired from `src/data/*.ts` to components. |
+| ✅ | **5 · QA loop** | Whole-page pixel triage first; only sections in failing bands get individual diffs. Every section must clear **95% × 3 viewports** — the score decides, not vibes. |
 
 The AI never invents a value. Every number a builder uses — font sizes, padding, colors, column counts, hover states, transition durations — comes from a script that measured the live page. Specs are generated from that JSON, a linter blocks incomplete ones, and the pixel score decides when a section is done.
 
