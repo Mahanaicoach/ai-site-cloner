@@ -208,10 +208,13 @@ npm run build && npm start -- -p 3000 -H 127.0.0.1   # background; localhost-onl
 
 Dev-mode QA pays on-demand compilation on every page load (and a stale dev-lock
 cost real time in the benchmark); `next start` serves prebuilt pages, so QA
-loads measure the clone, not the compiler. After each fix batch, re-run
-`npm run build` — for static pages the rebuild is incremental and fast. Fall
-back to `npm run dev` only while actively iterating on a single fix where
-hot-reload beats rebuild time.
+loads measure the clone, not the compiler. After each fix batch: **stop the
+server, `npm run build`, start it again** — rebuilding `.next` under a running
+`next start` leaves the served HTML pointing at chunk files that no longer
+exist, and the clone silently renders unstyled (QA scores crater for the wrong
+reason). The rebuild is incremental and fast for static pages. Fall back to
+`npm run dev` only while actively iterating on a single fix where hot-reload
+beats rebuild time.
 
 Then **triage whole-page first** — never open with 27 per-section diffs:
 

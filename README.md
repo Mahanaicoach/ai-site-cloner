@@ -30,12 +30,13 @@ Point it at a URL. `/clone-website` crawls the site, measures everything with sc
 
 | Problem | Solution here |
 |---|---|
-| Agent guesses CSS values from screenshots | `scripts/extract/section.mjs` — full `getComputedStyle()` DOM walk, exact values |
+| Agent guesses CSS values from screenshots | `scripts/extract/section.mjs` — full `getComputedStyle()` DOM walk, exact values (stored compact; `resolve-walk.mjs` reads any node) |
 | Responsive behavior guessed from desktop | `scripts/extract/responsive.mjs` — measures real column counts at 390/768/1440px |
-| "Looks close enough" QA | `scripts/diff.mjs` — pixel-diff score per section per viewport; 95% threshold to pass |
-| Agent mis-transcribes values into specs | `scripts/spec-scaffold.mjs` — mechanical spec sections generated straight from the extraction JSON |
+| "Looks close enough" QA | `scripts/diff.mjs` — pixel-diff score per section per viewport; 95% threshold to pass; `--triage` diffs the whole page first and touches only sections in failing bands |
+| QA says WHERE but not WHAT | `scripts/compare.mjs` — walks original + clone, prints the differing computed properties ordered by visual impact |
+| Agent mis-transcribes values into specs | `scripts/spec-scaffold.mjs` — mechanical spec sections generated straight from the extraction JSON (utility-CSS sites quote the markup itself) |
 | Incomplete specs slip through | `scripts/lint-spec.mjs` — mechanical completeness gate before any builder runs |
-| Long runs die and restart from zero | `docs/research/manifest.json` — every section's stage tracked; runs resume where they stopped |
+| Long runs die and restart from zero | `docs/research/manifest.json` — scripts self-report their stage transitions; `manifest.mjs resume` prints the exact next commands |
 | Single-page only | `scripts/extract/crawl.mjs` — sitemap + nav discovery, shared header/footer extracted once |
 | Clone is a dead-end copy | Content in `src/data/*.ts` + `/restyle` skill = rebrand without breaking layout |
 
