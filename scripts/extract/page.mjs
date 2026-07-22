@@ -26,7 +26,13 @@
 //                                       (default is compact-v1: style dictionary
 //                                       + inherited-prop pruning, ~70% smaller;
 //                                       resolve any node with resolve-walk.mjs)
-import { mkdirSync } from "node:fs";
+//
+//   node scripts/extract/page.mjs --rename section-3=hero,section-4=features [--host <h>]
+//     NO browser: renames the section JSONs (incl. state captures), probe files,
+//     screenshots, responsive.json and manifest entries in place. Use when
+//     detection got the sections right but the auto-names wrong — re-running the
+//     extraction just to rename costs 3 page loads for nothing.
+import { mkdirSync, existsSync, renameSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import {
   VIEWPORTS,
   openPage,
@@ -55,6 +61,94 @@ import { compactWalk, toLegacy } from "./walk-format.mjs";
 
 const t0 = Date.now();
 const args = parseArgs(process.argv.slice(2));
+
+// ── rename mode: pure file/manifest surgery, exits before any browser work ──
+if (args.rename) {
+  const pairs = String(args.rename).split(",").map((s) => s.trim()).filter(Boolean).map((p) => {
+    const eq = p.indexOf("=");
+    if (eq < 1) {
+      console.error(`Bad --rename "${p}" — use old=new[,old2=new2]`);
+      process.exit(1);
+    }
+    return { from: p.slice(0, eq).trim(), to: p.slice(eq + 1).trim() };
+  });
+  const manifestPath = "docs/research/manifest.json";
+  const manifest = existsSync(manifestPath) ? JSON.parse(readFileSync(manifestPath, "utf8")) : null;
+  let renameHost = typeof args.host === "string" ? args.host : manifest?.site ? hostOf(manifest.site) : null;
+  if (!renameHost) {
+    const dirs = existsSync("docs/research")
+      ? readdirSync("docs/research").filter((d) => existsSync(`docs/research/${d}/sections`))
+      : [];
+    if (dirs.length === 1) renameHost = dirs[0];
+  }
+  if (!renameHost) {
+    console.error("--rename needs --host <host> (no manifest or single research dir to derive it from)");
+    process.exit(1);
+  }
+  const sectionsDir = `docs/research/${renameHost}/sections`;
+  const shotsDir = `docs/design-references/${renameHost}`;
+  const mv = (from, to) => {
+    if (!existsSync(from)) return false;
+    renameSync(from, to);
+    console.log(`  ✓ ${from} → ${to}`);
+    return true;
+  };
+
+  for (const { from, to } of pairs) {
+    if (existsSync(`${sectionsDir}/${to}.json`)) {
+      console.error(`  ! target name "${to}" already exists in ${sectionsDir} — skipping "${from}"`);
+      continue;
+    }
+    let any = mv(`${sectionsDir}/${from}.json`, `${sectionsDir}/${to}.json`);
+    if (existsSync(sectionsDir)) {
+      for (const f of readdirSync(sectionsDir)) {
+        // state captures follow their base section (hero-hover.json etc.)
+        if (f.startsWith(`${from}-`) && f.endsWith(".json")) {
+          any = mv(`${sectionsDir}/${f}`, `${sectionsDir}/${to}-${f.slice(from.length + 1)}`) || any;
+        }
+      }
+    }
+    mv(`docs/research/${renameHost}/probe-${from}.json`, `docs/research/${renameHost}/probe-${to}.json`);
+    if (existsSync(shotsDir)) {
+      for (const f of readdirSync(shotsDir)) {
+        if (f.startsWith(`${from}-`) && /^(pc|ipad|phone)(-review)?\.png$/.test(f.slice(from.length + 1))) {
+          mv(`${shotsDir}/${f}`, `${shotsDir}/${to}-${f.slice(from.length + 1)}`);
+        }
+      }
+    }
+    const respPath = `docs/research/${renameHost}/responsive.json`;
+    if (existsSync(respPath)) {
+      const resp = JSON.parse(readFileSync(respPath, "utf8"));
+      let hits = 0;
+      for (const s of resp.sections || []) if (s.name === from) (s.name = to), hits++;
+      if (hits) {
+        writeFileSync(respPath, JSON.stringify(resp, null, 2) + "\n");
+        console.log(`  ✓ responsive.json: "${from}" → "${to}"`);
+      }
+    }
+    if (manifest) {
+      for (const p of manifest.pages || []) {
+        for (const s of p.sections || []) {
+          if (s.name !== from) continue;
+          s.name = to;
+          if (s.spec?.includes(`/${from}.spec.md`)) {
+            const ns = s.spec.replace(`/${from}.spec.md`, `/${to}.spec.md`);
+            mv(s.spec, ns);
+            s.spec = ns;
+          }
+          console.log(`  ✓ manifest: ${p.route} "${from}" → "${to}"`);
+        }
+      }
+    }
+    if (!any) console.error(`  ! no files found for section "${from}" under ${sectionsDir}`);
+  }
+  if (manifest) {
+    manifest.updatedAt = new Date().toISOString();
+    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
+  }
+  process.exit(0);
+}
+
 const url = args._[0];
 if (!url) {
   console.error('Usage: node scripts/extract/page.mjs <url> [--selector "css" --name x ...] [--depth 5] [--no-download] [--no-shots] [--no-site-files]');

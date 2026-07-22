@@ -66,6 +66,7 @@ All plain Playwright — run standalone, no MCP needed:
 node scripts/extract/page.mjs <url>                    # ONE-SHOT recon: tokens, css, assets, responsive,
                                                        #   section walks + every screenshot — 3 page loads, ~15s
 node scripts/extract/crawl.mjs <url> [--max 25]        # discover pages
+node scripts/extract/page.mjs --rename section-3=hero  # rename auto-detected sections in place (no browser)
 node scripts/extract/section.mjs <url> --selector "x" --state hover:".card"   # hover/scroll/click state diffs
 node scripts/extract/probe.mjs <url> --selector "x"    # per-viewport value table for specs
 node scripts/spec-scaffold.mjs --route / --all         # generate the mechanical spec sections from the
