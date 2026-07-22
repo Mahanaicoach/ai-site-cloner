@@ -79,6 +79,8 @@ node scripts/diff.mjs --original <url> --clone <url> --route / --triage --viewpo
                                                        # scored pixel diff QA: whole-page first, per-section
                                                        #   only where bands fail; 10-band breakdown names
                                                        #   WHERE it mismatches; scores land in the manifest
+node scripts/compare.mjs --original <url> --clone <url> --selector "x"   # WHAT differs on a failing section:
+                                                       #   computed-property table, geometry > typography > color
 node scripts/lint-spec.mjs docs/research/components    # spec completeness gate
 node scripts/manifest.mjs resume                       # one-screen digest: stage table + exact next commands
 ```

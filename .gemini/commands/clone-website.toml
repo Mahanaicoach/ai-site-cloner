@@ -43,6 +43,7 @@ The scripts do the mechanical work — **use them instead of hand-measuring via 
 | `node scripts/resolve-walk.mjs <sections-json> [--node <path>]` | Reader for section-walk JSON (compact or legacy): indexed outline of the tree, and fully resolved computed styles for any one node. Use this instead of reading the raw JSON — walks are stored compact (style dictionary + inherited-prop pruning) |
 | `node scripts/diff.mjs --original <url> --clone <url> [--selector css] --viewport all [--threshold 95]` | Scored pixel diff, original vs clone. **`--viewport all` scores pc+ipad+phone in one call**, and the per-viewport **band breakdown names the y-range where the mismatch lives** — read it before guessing at causes. **QA sweeps use `--route </r> --triage`: whole-page diff first, per-section diffs only for sections overlapping failing bands.** Plain `--route` (or repeated `--section name=css`) scores every section from ONE load per side per viewport. Original-side shots are cached 24h, so fix-iteration re-diffs only re-render the clone (`--fresh-original` to override) |
 | **`node scripts/spec-scaffold.mjs --route <r> --section <name>`** (or `--all`) | **Generates the mechanical spec sections** (frontmatter, DOM, computed styles, assets, text, responsive) straight from the extraction JSON into `docs/research/components/<route-slug>/<name>.spec.md`, leaving `<!-- AGENT: fill -->` blocks for the judgment parts. Never transcribe JSON values by hand |
+| `node scripts/compare.mjs --original <url> --clone <url> --selector "css" [--viewport vp]` | **Property-level diff for failing QA sections** — walks both live DOMs, aligns them structurally, prints differing computed properties ordered by visual impact (geometry > typography > color) plus missing/extra nodes. Run on a failing band BEFORE editing anything |
 | `node scripts/lint-spec.mjs <spec.md\|dir>` | Mechanical spec-completeness gate — must pass before ANY builder dispatch |
 | `node scripts/manifest.mjs <cmd>` | Pipeline state: init / add-page / add-section / set / status / next / **resume** (one-screen digest: stage table + exact next commands and file paths) |
 
@@ -215,7 +216,11 @@ node scripts/diff.mjs --original <orig-page-url> --clone http://localhost:3000<r
 ```
 
 - **Pass = ≥95% on all three viewports** (diff.mjs sets `qa_passed` automatically on a `--route` sweep)
-- Below 95% → **read the band breakdown first**: it names the y-range where the mismatch lives, so you inspect that band of the diff image in `docs/research/qa/` (open the `-review.png` copy diff.mjs writes for failing sections) instead of eyeballing the whole section. Then check the spec (wrong extraction → re-extract and fix; right spec, wrong build → fix component), re-diff
+- Below 95% → **read the band breakdown, then run compare.mjs — BEFORE touching the spec or component**:
+  ```bash
+  node scripts/compare.mjs --original <orig-page-url> --clone http://localhost:3000<route> --selector "<sel>" --viewport <failing-vp>
+  ```
+  The pixel diff says THAT a band mismatches; compare.mjs says WHAT — it walks both live DOMs, aligns them structurally, and prints the differing computed properties ordered by visual impact (geometry > typography > color), plus any nodes missing/extra in the clone. Fix exactly what it names (wrong extraction → correct spec; right spec → fix component), re-diff. The diff image's `-review.png` in `docs/research/qa/` is the visual companion
 - A large height mismatch reported by diff.mjs = missing content or wrong spacing — fix before pixel-tweaking
 - Max 3 fix iterations per section, then record the gap honestly and move on
 - **Text-heavy sections at phone width often plateau at 90–95%** when the target's font isn't available on Google Fonts (e.g. Source Sans Pro → Source Sans 3). Different metrics = different wrap points = unavoidable pixel drift. Confirm the layout matches, note the substitution, and accept it.
