@@ -204,7 +204,20 @@ Per page: create `src/app/<route>/page.tsx` importing its section components wit
 
 ## Phase 5 — Scored QA Loop
 
-Start the clone: `npm run dev` (background). Then **triage whole-page first** — never open with 27 per-section diffs:
+**Serve the clone from a production build, not the dev server:**
+
+```bash
+npm run build && npm start -- -p 3000 -H 127.0.0.1   # background; localhost-only
+```
+
+Dev-mode QA pays on-demand compilation on every page load (and a stale dev-lock
+cost real time in the benchmark); `next start` serves prebuilt pages, so QA
+loads measure the clone, not the compiler. After each fix batch, re-run
+`npm run build` — for static pages the rebuild is incremental and fast. Fall
+back to `npm run dev` only while actively iterating on a single fix where
+hot-reload beats rebuild time.
+
+Then **triage whole-page first** — never open with 27 per-section diffs:
 
 ```bash
 node scripts/diff.mjs --original <orig-page-url> --clone http://localhost:3000<route> --route <r> --triage --viewport all
