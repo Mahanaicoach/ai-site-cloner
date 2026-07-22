@@ -8,9 +8,20 @@
 //                 --section hero=section.hero --section features=#features
 //                 (or --route / to pull every section of that route from the manifest)
 //
+// Triage mode:  node scripts/diff.mjs --original <url> --clone <url> --route /
+//                 --triage --viewport all
+//               Whole-page diff FIRST per viewport; a passing viewport (match +
+//               every band ≥ threshold, heights agree) skips its per-section
+//               diffs entirely, a failing one per-section-diffs ONLY the
+//               sections overlapping the failing bands. Sections it never
+//               touched get an inferred score (worst overlapping page band).
+//               This is the default QA sweep — a good clone costs 2 loads per
+//               viewport instead of 2 + 2×N.
+//
 // Batched mode loads each side ONCE per viewport and screenshots every section
 // from that load — an 8-section sweep costs 6 page loads instead of 48. Use it
-// for the initial QA sweep; fix iterations should stay single-section.
+// when you want individual scores for every section regardless of page result;
+// fix iterations should stay single-section.
 //
 // The original side of a live/batched run is cached: a PNG + .meta.json sidecar
 // under docs/research/qa/ is reused when the url/selector/viewport match and the
@@ -104,6 +115,36 @@ async function shoot(url, path, viewport, selector) {
     await close();
   }
   return path;
+}
+
+// Whole-page shot for triage mode; optionally measures each selector's page-Y
+// box from the same load, so failing diff bands can be mapped to the sections
+// that occupy them without any extra navigation.
+async function shootPageWithBoxes(url, path, viewport, selectors = null) {
+  const { page, close } = await openPage(viewport);
+  try {
+    await gotoAndSettle(page, url);
+    await autoScroll(page, { force: true });
+    await freezePage(page);
+    await page.screenshot({ path, fullPage: true });
+    if (!selectors) return null;
+    return await page.evaluate((sels) => {
+      window.scrollTo(0, 0);
+      const out = {};
+      for (const sel of sels) {
+        const el = document.querySelector(sel);
+        if (!el) {
+          out[sel] = null;
+          continue;
+        }
+        const r = el.getBoundingClientRect();
+        out[sel] = { y: Math.round(r.y + scrollY), h: Math.round(r.height) };
+      }
+      return out;
+    }, selectors);
+  } finally {
+    await close();
+  }
 }
 
 // Batched capture: one load, one forced scroll, one freeze — then every section
@@ -232,12 +273,142 @@ function parseViewports() {
 let output; // final stdout JSON
 const flat = []; // [scope, viewportName, result] for the stderr summary + threshold
 
+// Manifest self-report shared by batched and triage modes: record per-viewport
+// scores and advance qa_passed when all three viewports clear the threshold.
+function reportScores(route, sections, sectionResults, vpNames) {
+  if (!route) return;
+  const qaThreshold = args.threshold ? Number(args.threshold) : 95;
+  let scored = 0, passed = 0;
+  selfReport((m) => {
+    const p = findPage(m, route);
+    if (!p) return false;
+    let changed = false;
+    for (const s of sections) {
+      const sec = findSection(p, s.name);
+      if (!sec) continue;
+      for (const vp of vpNames) {
+        const r = sectionResults[s.name]?.viewports[vp];
+        if (r && !r.error && typeof r.match === "number") {
+          sec.scores[vp] = r.match;
+          changed = true;
+          scored++;
+        }
+      }
+      if (["pc", "ipad", "phone"].every((v) => typeof sec.scores[v] === "number" && sec.scores[v] >= qaThreshold)) {
+        if (advanceStage(sec, "qa_passed")) passed++;
+        changed = true;
+      }
+    }
+    if (changed) updatePageStatus(p);
+    return changed;
+  });
+  if (scored) console.error(`  ✓ manifest: ${scored} score(s) recorded${passed ? `, ${passed} section(s) → qa_passed` : ""}`);
+}
+
 if (args.original && args.clone) {
   const vpNames = parseViewports();
   mkdirSync(DIR, { recursive: true });
   const sections = parseSections();
 
-  if (sections.length) {
+  if (args.triage && sections.length) {
+    // ── Triage mode: whole-page first, sections only where the page fails ──
+    // A passing viewport (match ≥ threshold, every band ≥ threshold, heights
+    // agree) proves its sections without N per-section diffs. A failing one
+    // names the bands that failed; only sections overlapping those bands get
+    // individually diffed. Untouched sections receive an inferred score (the
+    // worst page band they overlap) so the manifest still fills in.
+    const thr = args.threshold ? Number(args.threshold) : 95;
+    const routeSlug = slugify(String(args.route || "page"));
+    const sectionResults = {};
+    for (const s of sections) sectionResults[s.name] = { viewports: {} };
+    const triage = {};
+
+    await Promise.all(
+      vpNames.map(async (vp) => {
+        const viewport = VIEWPORTS[vp];
+        const origPath = `${DIR}/page-${routeSlug}-${vp}-original.png`;
+        const clonePath = `${DIR}/page-${routeSlug}-${vp}-clone.png`;
+        const cloneJob = shootPageWithBoxes(args.clone, clonePath, viewport, sections.map((s) => s.selector));
+        let origJob = Promise.resolve();
+        if (originalCached(origPath, args.original, viewport, null)) {
+          console.error(`  reusing cached original page shot [${vp}]`);
+        } else {
+          origJob = shootPageWithBoxes(args.original, origPath, viewport).then(() =>
+            writeOriginalMeta(origPath, args.original, viewport, null)
+          );
+        }
+        const [boxes] = await Promise.all([cloneJob, origJob]);
+        const r = compare(origPath, clonePath, `${DIR}/page-${routeSlug}-${vp}-diff.png`);
+        flat.push([`page${args.route && args.route !== true ? args.route : ""}`, vp, r]);
+
+        const heightOk = Math.abs(r.originalHeight - r.cloneHeight) <= Math.max(8, r.originalHeight * 0.005);
+        const bandY = (i) => [
+          Math.floor((r.height * i) / BAND_COUNT),
+          i === BAND_COUNT - 1 ? r.height : Math.floor((r.height * (i + 1)) / BAND_COUNT),
+        ];
+        const failing = r.bands.map((b, i) => ({ ...b, i })).filter((b) => b.match < thr);
+        const pass = r.match >= thr && heightOk && !failing.length;
+
+        const overlapsFailing = (sel) => {
+          const box = boxes?.[sel];
+          if (!box) return true; // section not locatable on the clone — don't guess, diff it
+          return failing.some((b) => {
+            const [y0, y1] = bandY(b.i);
+            return box.y < y1 && box.y + box.h > y0;
+          });
+        };
+        const need = pass ? [] : sections.filter((s) => overlapsFailing(s.selector));
+        triage[vp] = { page: r, pass, heightOk, failingBands: failing.map((b) => b.band), sectionsDiffed: need.map((s) => s.name) };
+
+        const needNames = new Set(need.map((s) => s.name));
+        for (const s of sections) {
+          if (needNames.has(s.name)) continue;
+          const box = boxes?.[s.selector];
+          if (!box) continue;
+          const overlapped = r.bands.filter((_, i) => {
+            const [y0, y1] = bandY(i);
+            return box.y < y1 && box.y + box.h > y0;
+          });
+          if (!overlapped.length) continue;
+          sectionResults[s.name].viewports[vp] = {
+            match: Math.min(...overlapped.map((b) => b.match)),
+            inferred: "worst overlapping page band",
+          };
+        }
+
+        if (need.length) {
+          const origPathFor = (n) => `${DIR}/${n}-${vp}-original.png`;
+          const jobs = [shootSectionsOnce(args.clone, viewport, need, (n) => `${DIR}/${n}-${vp}-clone.png`)];
+          const missing = need.filter((s) => !originalCached(origPathFor(s.name), args.original, viewport, s.selector));
+          if (missing.length) {
+            jobs.push(
+              shootSectionsOnce(args.original, viewport, need, origPathFor).then((captured) => {
+                for (const s of need) {
+                  if (captured[s.name]) writeOriginalMeta(origPathFor(s.name), args.original, viewport, s.selector);
+                }
+              })
+            );
+          }
+          await Promise.all(jobs);
+          for (const s of need) {
+            const a = origPathFor(s.name);
+            const b = `${DIR}/${s.name}-${vp}-clone.png`;
+            if (!existsSync(a) || !existsSync(b)) {
+              sectionResults[s.name].viewports[vp] = { error: `missing ${!existsSync(a) ? "original" : "clone"} shot` };
+              flat.push([s.name, vp, null]);
+              continue;
+            }
+            const sr = compare(a, b, `${DIR}/${s.name}-${vp}-diff.png`);
+            sectionResults[s.name].viewports[vp] = sr;
+            flat.push([s.name, vp, sr]);
+          }
+        }
+      })
+    );
+    await closeBrowser();
+    output = { route: args.route && args.route !== true ? args.route : null, triage, sections: sectionResults };
+    reportScores(output.route, sections, sectionResults, vpNames);
+  } else if (sections.length) {
     // Batched mode: per (side × viewport) ONE load covers every section. All six
     // loads run concurrently on the shared browser.
     await Promise.all(
@@ -281,38 +452,7 @@ if (args.original && args.clone) {
       }
     }
     output = { route: args.route && args.route !== true ? args.route : null, sections: sectionResults };
-
-    // A --route sweep IS the QA measurement — record per-viewport scores in the
-    // manifest and advance sections whose three viewports all clear the
-    // threshold to qa_passed, instead of leaving that to a separate command.
-    if (output.route) {
-      const qaThreshold = args.threshold ? Number(args.threshold) : 95;
-      let scored = 0, passed = 0;
-      selfReport((m) => {
-        const p = findPage(m, output.route);
-        if (!p) return false;
-        let changed = false;
-        for (const s of sections) {
-          const sec = findSection(p, s.name);
-          if (!sec) continue;
-          for (const vp of vpNames) {
-            const r = sectionResults[s.name].viewports[vp];
-            if (r && !r.error) {
-              sec.scores[vp] = r.match;
-              changed = true;
-              scored++;
-            }
-          }
-          if (["pc", "ipad", "phone"].every((v) => typeof sec.scores[v] === "number" && sec.scores[v] >= qaThreshold)) {
-            if (advanceStage(sec, "qa_passed")) passed++;
-            changed = true;
-          }
-        }
-        if (changed) updatePageStatus(p);
-        return changed;
-      });
-      if (scored) console.error(`  ✓ manifest: ${scored} score(s) recorded${passed ? `, ${passed} section(s) → qa_passed` : ""}`);
-    }
+    reportScores(output.route, sections, sectionResults, vpNames);
   } else {
     // Single live mode.
     const name = args.name || slugify(args.selector || "page");

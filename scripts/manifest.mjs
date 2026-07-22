@@ -219,7 +219,7 @@ switch (cmd) {
       if (merged.length && merged.length === p.sections.length) {
         actions.push({
           what: `QA ${p.route} (all sections merged)`,
-          cmds: [`node scripts/diff.mjs --original ${p.url} --clone http://localhost:3000${p.route === "/" ? "" : p.route} --route ${p.route} --viewport all`],
+          cmds: [`node scripts/diff.mjs --original ${p.url} --clone http://localhost:3000${p.route === "/" ? "" : p.route} --route ${p.route} --triage --viewport all`],
         });
       } else {
         for (const s of merged) {

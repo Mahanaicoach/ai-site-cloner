@@ -75,8 +75,10 @@ node scripts/resolve-walk.mjs <sections.json> --node 0.2.1   # resolved styles f
                                                        #   stored compact: style dict + inheritance pruning)
 node scripts/extract/canvas.mjs <url>                  # capture <canvas> artwork as video/PNG
 node scripts/extract/tokens.mjs / css.mjs / assets.mjs / responsive.mjs / screenshot.mjs   # single-purpose re-runs
-node scripts/diff.mjs --original <url> --clone <url> --viewport all   # scored pixel diff, all 3 viewports in one
-                                                       #   call; 10-band breakdown names WHERE it mismatches
+node scripts/diff.mjs --original <url> --clone <url> --route / --triage --viewport all
+                                                       # scored pixel diff QA: whole-page first, per-section
+                                                       #   only where bands fail; 10-band breakdown names
+                                                       #   WHERE it mismatches; scores land in the manifest
 node scripts/lint-spec.mjs docs/research/components    # spec completeness gate
 node scripts/manifest.mjs resume                       # one-screen digest: stage table + exact next commands
 ```

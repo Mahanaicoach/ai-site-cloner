@@ -41,7 +41,7 @@ The scripts do the mechanical work — **use them instead of hand-measuring via 
 | `node scripts/extract/screenshot.mjs <url> [--selector css --name x ...]` | Extra screenshots at phone/iPad/PC (page.mjs already shot everything once). `--selector`/`--name` repeat — one call, 3 loads, N sections |
 | `node scripts/extract/tokens.mjs` / `css.mjs` / `assets.mjs` / `responsive.mjs` | Single-purpose re-runs of one page.mjs output when something needs refreshing |
 | `node scripts/resolve-walk.mjs <sections-json> [--node <path>]` | Reader for section-walk JSON (compact or legacy): indexed outline of the tree, and fully resolved computed styles for any one node. Use this instead of reading the raw JSON — walks are stored compact (style dictionary + inherited-prop pruning) |
-| `node scripts/diff.mjs --original <url> --clone <url> [--selector css] --viewport all [--threshold 95]` | Scored pixel diff, original vs clone. **`--viewport all` scores pc+ipad+phone in one call**, and the per-viewport **band breakdown names the y-range where the mismatch lives** — read it before guessing at causes. **Batched sweep: `--route </r>` (or repeated `--section name=css`) scores every section of a page from ONE load per side per viewport.** Original-side shots are cached 24h, so fix-iteration re-diffs only re-render the clone (`--fresh-original` to override) |
+| `node scripts/diff.mjs --original <url> --clone <url> [--selector css] --viewport all [--threshold 95]` | Scored pixel diff, original vs clone. **`--viewport all` scores pc+ipad+phone in one call**, and the per-viewport **band breakdown names the y-range where the mismatch lives** — read it before guessing at causes. **QA sweeps use `--route </r> --triage`: whole-page diff first, per-section diffs only for sections overlapping failing bands.** Plain `--route` (or repeated `--section name=css`) scores every section from ONE load per side per viewport. Original-side shots are cached 24h, so fix-iteration re-diffs only re-render the clone (`--fresh-original` to override) |
 | **`node scripts/spec-scaffold.mjs --route <r> --section <name>`** (or `--all`) | **Generates the mechanical spec sections** (frontmatter, DOM, computed styles, assets, text, responsive) straight from the extraction JSON into `docs/research/components/<route-slug>/<name>.spec.md`, leaving `<!-- AGENT: fill -->` blocks for the judgment parts. Never transcribe JSON values by hand |
 | `node scripts/lint-spec.mjs <spec.md\|dir>` | Mechanical spec-completeness gate — must pass before ANY builder dispatch |
 | `node scripts/manifest.mjs <cmd>` | Pipeline state: init / add-page / add-section / set / status / next / **resume** (one-screen digest: stage table + exact next commands and file paths) |
@@ -191,15 +191,22 @@ Per page: create `src/app/<route>/page.tsx` importing its section components wit
 
 ## Phase 5 — Scored QA Loop
 
-Start the clone: `npm run dev` (background). Then **score the whole page's sections in ONE batched call** (one load per side per viewport instead of one per section):
+Start the clone: `npm run dev` (background). Then **triage whole-page first** — never open with 27 per-section diffs:
 
 ```bash
-node scripts/diff.mjs --original <orig-page-url> --clone http://localhost:3000<route> --route <r> --viewport all
+node scripts/diff.mjs --original <orig-page-url> --clone http://localhost:3000<route> --route <r> --triage --viewport all
 ```
 
-The `--route` sweep records every score in the manifest itself and advances
-sections whose three viewports all clear 95% to `qa_passed` — no separate
-manifest commands during QA.
+Per viewport: one whole-page diff decides everything. A **passing viewport**
+(match ≥95%, every band ≥95%, heights agree) proves all its sections at once —
+no per-section diffs run, sections get the worst overlapping page band as their
+score. A **failing viewport** names its failing bands, and ONLY the sections
+overlapping those bands get individually diffed. On a good clone the whole QA
+phase is a handful of page loads.
+
+Scores and `qa_passed` stages land in the manifest automatically — no separate
+manifest commands during QA. (Plain `--route` without `--triage` still scores
+every section individually if you need the full table.)
 
 **Fix iterations stay single-section** — the original-side shots captured by the sweep are cached, so a re-diff only re-renders the clone:
 
