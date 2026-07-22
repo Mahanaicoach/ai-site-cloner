@@ -40,6 +40,7 @@ import {
   gotoAndSettle,
   autoScroll,
   freezePage,
+  shootSectionsFromFullPage,
   slugify,
   parseArgs,
   toList,
@@ -103,8 +104,10 @@ async function shoot(url, path, viewport, selector) {
 }
 
 // Batched capture: one load, one forced scroll, one freeze — then every section
-// screenshotted from the same live page. Sections are shot in the given order;
-// a section that fails to resolve is reported and skipped, not fatal.
+// cropped out of ONE full-page screenshot (pixel-identical to a per-section
+// locator chain, minus N scroll+shoot round-trips). A section the crop can't
+// produce falls back to a locator shot inside the helper; anything neither
+// path captures is reported and skipped, not fatal.
 async function shootSectionsOnce(url, viewport, sections, pathFor) {
   const { page, close } = await openPage(viewport);
   const captured = {};
@@ -112,17 +115,11 @@ async function shootSectionsOnce(url, viewport, sections, pathFor) {
     await gotoAndSettle(page, url);
     await autoScroll(page, { force: true });
     await freezePage(page);
-    for (const { name, selector } of sections) {
-      try {
-        const loc = page.locator(selector).first();
-        await loc.scrollIntoViewIfNeeded({ timeout: 3000 });
-        await loc.screenshot({ path: pathFor(name), timeout: 5000 });
-        captured[name] = true;
-      } catch (e) {
-        console.error(`  ! ${name} (${selector}): ${String(e).split("\n")[0]}`);
-        captured[name] = false;
-      }
-    }
+    const { failed } = await shootSectionsFromFullPage(page, sections, {
+      pathFor: (s) => pathFor(s.name),
+    });
+    for (const { name } of sections) captured[name] = !failed.includes(name);
+    for (const name of failed) console.error(`  ! section shot failed: ${name} @ ${viewport.width}px`);
   } finally {
     await close();
   }
