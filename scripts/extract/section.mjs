@@ -8,6 +8,8 @@
 //     [--viewport pc|ipad|phone] [--depth 5]
 //     [--state scroll:600 | click:.tab-btn | hover:.card]
 //     [--legacy]   emit the old full-blob walk format (default: compact-v1)
+//     [--audit]    with --state: ALSO store the full before/after trees
+//                  (default output is header + diff + added/removed nodes only)
 //
 //   --selector and --name repeat, and every section is walked from a SINGLE
 //   page load. Extracting five sections is one navigation, not five:
@@ -15,7 +17,11 @@
 //       --selector "#banner" --name banner \
 //       --selector "#one"    --name tiles
 //
-// Output: docs/research/<host>/sections/<name>.json  (stateA/stateB/diff when --state used)
+// Output: docs/research/<host>/sections/<name>.json
+//   default walk:  { format, tree, styleTable }
+//   with --state:  { trigger, settleMs, diff, added, removed } — appeared and
+//   disappeared subtrees carry their styles inline, so the capture is
+//   self-contained without storing two full trees.
 import {
   VIEWPORTS,
   openPage,
@@ -29,8 +35,8 @@ import {
   parseArgs,
   toList,
 } from "../lib.mjs";
-import { walkSections, diffNode } from "./collectors.mjs";
-import { compactWalk, toLegacy } from "./walk-format.mjs";
+import { walkSections } from "./collectors.mjs";
+import { compactWalk, toLegacy, diffTrees } from "./walk-format.mjs";
 
 const args = parseArgs(process.argv.slice(2));
 const url = args._[0];
@@ -82,18 +88,22 @@ if (args.state) {
 
   const stateB = await walkSections(page, selectors, { depth });
   for (const { selector, name } of targets) {
-    const diff = [];
-    diffNode(stateA[selector], stateB[selector], stateA[selector].tag, diff);
+    // Diff-only by default: the full before/after trees used to make a single
+    // state file 300KB+ of which a few KB mattered. The structural diff covers
+    // style/pseudo/text changes AND appeared/disappeared subtrees (with their
+    // styles inline), so nothing actionable is lost. --audit keeps the trees.
+    const { changed, added, removed } = diffTrees(stateA[selector], stateB[selector]);
     writeJson(`docs/research/${hostOf(url)}/sections/${name}.json`, {
       ...meta,
       selector,
       trigger: args.state,
       settleMs: settle,
-      stateA: stateA[selector],
-      stateB: stateB[selector],
-      diff,
+      diff: changed,
+      added,
+      removed,
+      ...(args.audit ? { stateA: stateA[selector], stateB: stateB[selector] } : {}),
     });
-    console.log(`${name}: ${diff.length} properties changed after "${args.state}" (waited ${settle}ms)`);
+    console.log(`${name}: ${changed.length} properties changed, +${added.length}/-${removed.length} nodes after "${args.state}" (waited ${settle}ms)`);
   }
 } else {
   for (const { selector, name } of targets) {

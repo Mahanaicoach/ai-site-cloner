@@ -126,7 +126,10 @@ node scripts/extract/section.mjs <page-url> --selector "<sel>" --name <name>-scr
 State captures wait for the section's actual transition duration, so a slow fade is
 recorded at its end value, not mid-flight — check `settleMs` in the output if a diff
 looks wrong. The `diff` array covers `::before`/`::after` too, which is where hover
-overlays usually live. Cross-check discovered behaviors against `css.json`'s
+overlays usually live. Captures are **diff-only**: `diff` lists changed props (plus
+`(text)`/`(classes)` changes), and `added`/`removed` carry subtrees that exist in
+only one state with their styles inline — conditionally-rendered dropdowns and
+panels land there. Pass `--audit` to also store the full before/after trees. Cross-check discovered behaviors against `css.json`'s
 `interactiveStates` — a :hover rule in the stylesheet with no captured state means
 the extraction is not done.
 
