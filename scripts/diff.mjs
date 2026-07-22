@@ -351,7 +351,10 @@ if (args.original && args.clone) {
 
         const overlapsFailing = (sel) => {
           const box = boxes?.[sel];
-          if (!box) return true; // section not locatable on the clone — don't guess, diff it
+          // Not locatable — or matching a zero-height element (Next.js injects
+          // empty divs at the top of <body>, so a positional selector can hit
+          // one) — means the box proves nothing: don't guess, diff the section.
+          if (!box || box.h < 1) return true;
           return failing.some((b) => {
             const [y0, y1] = bandY(b.i);
             return box.y < y1 && box.y + box.h > y0;
@@ -364,7 +367,7 @@ if (args.original && args.clone) {
         for (const s of sections) {
           if (needNames.has(s.name)) continue;
           const box = boxes?.[s.selector];
-          if (!box) continue;
+          if (!box || box.h < 1) continue;
           const overlapped = r.bands.filter((_, i) => {
             const [y0, y1] = bandY(i);
             return box.y < y1 && box.y + box.h > y0;
