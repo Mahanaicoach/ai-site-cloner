@@ -478,16 +478,20 @@ export function reviewPathFor(pngPath) {
   return pngPath.replace(/\.png$/i, "-review.png");
 }
 
-// Box-filter downscale to REVIEW_WIDTH wide. `src` is a PNG instance, a PNG
-// buffer, or a file path. No-op (returns false) when already narrow enough.
+// Box-filter downscale to REVIEW_WIDTH wide. `src` is a decoded image (a PNG
+// instance or the plain {width,height,data} object PNG.sync.read returns — it
+// is NOT a PNG instance, so duck-type on .data), a PNG buffer, or a file path.
+// No-op (returns false) when already narrow enough.
 export function writeReviewPng(src, destPath) {
   let img;
   try {
-    img = src instanceof PNG ? src : PNG.sync.read(typeof src === "string" ? readFileSync(src) : src);
+    if (typeof src === "string") img = PNG.sync.read(readFileSync(src));
+    else if (Buffer.isBuffer(src)) img = PNG.sync.read(src);
+    else img = src;
   } catch {
     return false; // unreadable source — review copy is best-effort
   }
-  if (img.width <= REVIEW_WIDTH) return false;
+  if (!img?.data || !img.width || img.width <= REVIEW_WIDTH) return false;
   const scale = REVIEW_WIDTH / img.width;
   const w = REVIEW_WIDTH;
   const h = Math.max(1, Math.round(img.height * scale));
