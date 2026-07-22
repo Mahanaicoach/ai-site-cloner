@@ -47,6 +47,8 @@ The scripts do the mechanical work — **use them instead of hand-measuring via 
 | `node scripts/lint-spec.mjs <spec.md\|dir>` | Mechanical spec-completeness gate — must pass before ANY builder dispatch |
 | `node scripts/manifest.mjs <cmd>` | Pipeline state: init / add-page / add-section / set / status / next |
 
+**Screenshots come in two sizes.** Every screenshot the scripts produce gets a 640px-wide `-review.png` twin (when the full-res is wider). **Open the `-review.png` for judgment work** — reviewing sections, comparing pages, inspecting failing diff bands; it's visually sufficient at half the cost. Full-res files are for pixelmatch and for builder-agent prompts only.
+
 Browser MCP (Chrome MCP, Playwright MCP — if available) is for **judgment work only**: watching how the page behaves while scrolling, exploring what's clickable, understanding an animation. Numbers always come from the scripts. If no browser MCP is available, the scripts alone are sufficient — use extra `screenshot.mjs` and `section.mjs --state` calls to observe behavior.
 
 The scripts are plain Node CLIs — any coding agent can run them. Playwright's Chromium auto-installs on the first script run (or run `npm run setup` once). If your tool has no subagent/worktree support, skip the dispatch mechanics and build each section yourself, sequentially, from the same lint-passing specs — every quality gate still applies.
@@ -204,7 +206,7 @@ node scripts/diff.mjs --original <orig-page-url> --clone http://localhost:3000<r
 ```
 
 - **Pass = ≥95% on all three viewports** → `--stage qa_passed`
-- Below 95% → **read the band breakdown first**: it names the y-range where the mismatch lives, so you inspect that band of the diff image in `docs/research/qa/` instead of eyeballing the whole section. Then check the spec (wrong extraction → re-extract and fix; right spec, wrong build → fix component), re-diff
+- Below 95% → **read the band breakdown first**: it names the y-range where the mismatch lives, so you inspect that band of the diff image in `docs/research/qa/` (open the `-review.png` copy diff.mjs writes for failing sections) instead of eyeballing the whole section. Then check the spec (wrong extraction → re-extract and fix; right spec, wrong build → fix component), re-diff
 - A large height mismatch reported by diff.mjs = missing content or wrong spacing — fix before pixel-tweaking
 - Max 3 fix iterations per section, then record the gap honestly and move on
 - **Text-heavy sections at phone width often plateau at 90–95%** when the target's font isn't available on Google Fonts (e.g. Source Sans Pro → Source Sans 3). Different metrics = different wrap points = unavoidable pixel drift. Confirm the layout matches, note the substitution, and accept it.

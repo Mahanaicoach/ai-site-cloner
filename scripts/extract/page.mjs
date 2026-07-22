@@ -41,6 +41,8 @@ import {
   autoScroll,
   freezePage,
   shootSectionsFromFullPage,
+  writeReviewPng,
+  reviewPathFor,
   hostOf,
   writeJson,
   parseArgs,
@@ -277,7 +279,9 @@ if (doShots) {
         });
         for (const name of failed) console.error(`  ! section shot failed: ${name} @ ${vp}`);
       } else {
-        await page.screenshot({ path: `${shotDir}/${pageSlug}-${vp}.png`, fullPage: true });
+        const path = `${shotDir}/${pageSlug}-${vp}.png`;
+        await page.screenshot({ path, fullPage: true });
+        writeReviewPng(path, reviewPathFor(path));
       }
       console.error(`  ✓ screenshots @ ${vp}`);
     })

@@ -17,6 +17,8 @@ import {
   autoScroll,
   freezePage,
   shootSectionsFromFullPage,
+  writeReviewPng,
+  reviewPathFor,
   hostOf,
   slugify,
   parseArgs,
@@ -46,6 +48,7 @@ await forEachViewport(wanted, async (page, vp) => {
   if (shots.length === 0) {
     const path = `${outDir}/${names[0] || "page"}-${vp}.png`;
     await page.screenshot({ path, fullPage: true });
+    writeReviewPng(path, reviewPathFor(path));
     console.log(`  ✓ ${path}`);
     return;
   }

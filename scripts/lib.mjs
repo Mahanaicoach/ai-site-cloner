@@ -463,6 +463,64 @@ export async function freezePage(page) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Review-size screenshots
+//
+// Full-res PNGs (a full clone run produces ~8.5MB of them) are what pixelmatch
+// and builder agents need — but the FOREMAN opens screenshots dozens of times
+// just to judge "does this look right", and every full-res view costs tokens.
+// A 640px-wide -review.png next to each full-res file is visually sufficient
+// for judgment work at a fraction of the size.
+// ---------------------------------------------------------------------------
+export const REVIEW_WIDTH = 640;
+
+export function reviewPathFor(pngPath) {
+  return pngPath.replace(/\.png$/i, "-review.png");
+}
+
+// Box-filter downscale to REVIEW_WIDTH wide. `src` is a PNG instance, a PNG
+// buffer, or a file path. No-op (returns false) when already narrow enough.
+export function writeReviewPng(src, destPath) {
+  let img;
+  try {
+    img = src instanceof PNG ? src : PNG.sync.read(typeof src === "string" ? readFileSync(src) : src);
+  } catch {
+    return false; // unreadable source — review copy is best-effort
+  }
+  if (img.width <= REVIEW_WIDTH) return false;
+  const scale = REVIEW_WIDTH / img.width;
+  const w = REVIEW_WIDTH;
+  const h = Math.max(1, Math.round(img.height * scale));
+  const out = new PNG({ width: w, height: h });
+  const sd = img.data, dd = out.data;
+  for (let y = 0; y < h; y++) {
+    const sy0 = Math.floor(y / scale);
+    const sy1 = Math.min(img.height, Math.max(sy0 + 1, Math.floor((y + 1) / scale)));
+    for (let x = 0; x < w; x++) {
+      const sx0 = Math.floor(x / scale);
+      const sx1 = Math.min(img.width, Math.max(sx0 + 1, Math.floor((x + 1) / scale)));
+      let r = 0, g = 0, b = 0, a = 0, n = 0;
+      for (let sy = sy0; sy < sy1; sy++) {
+        for (let sx = sx0; sx < sx1; sx++) {
+          const i = (sy * img.width + sx) * 4;
+          r += sd[i];
+          g += sd[i + 1];
+          b += sd[i + 2];
+          a += sd[i + 3];
+          n++;
+        }
+      }
+      const j = (y * w + x) * 4;
+      dd[j] = r / n;
+      dd[j + 1] = g / n;
+      dd[j + 2] = b / n;
+      dd[j + 3] = a / n;
+    }
+  }
+  writeFileSync(destPath, PNG.sync.write(out));
+  return true;
+}
+
 // Screenshot every section from ONE full-page capture: measure each selector's
 // page-coordinate box, take a single fullPage shot, and crop the sections out of
 // it (deviceScaleFactor is 1, so CSS px == image px). Pixel-identical to a
@@ -473,10 +531,12 @@ export async function freezePage(page) {
 //
 // `sections` = [{ name, selector }]; `pathFor(section)` -> output PNG path;
 // `fullPagePath` additionally saves the full-page shot itself.
+// `review: true` (default) also writes a 640px -review.png beside every PNG —
+// pass false for QA captures that only feed pixelmatch.
 // Sections the crop can't produce (selector missing, zero box, page taller than
 // Chromium's capture limit) fall back to a locator screenshot; returns
 // { failed: [names] } for anything neither path could capture.
-export async function shootSectionsFromFullPage(page, sections, { fullPagePath = null, pathFor }) {
+export async function shootSectionsFromFullPage(page, sections, { fullPagePath = null, pathFor, review = true }) {
   const boxes = await page
     .evaluate((sels) => {
       window.scrollTo(0, 0);
@@ -510,6 +570,7 @@ export async function shootSectionsFromFullPage(page, sections, { fullPagePath =
   } catch {
     /* unreadable capture — every section falls back below */
   }
+  if (review && img && fullPagePath) writeReviewPng(img, reviewPathFor(fullPagePath));
 
   const fallbacks = [];
   for (const s of sections) {
@@ -526,6 +587,7 @@ export async function shootSectionsFromFullPage(page, sections, { fullPagePath =
       const out = new PNG({ width: w, height: h });
       PNG.bitblt(img, out, x, y, w, h, 0, 0);
       writeFileSync(pathFor(s), PNG.sync.write(out));
+      if (review) writeReviewPng(out, reviewPathFor(pathFor(s)));
     } catch {
       fallbacks.push(s);
     }
@@ -537,6 +599,7 @@ export async function shootSectionsFromFullPage(page, sections, { fullPagePath =
       const loc = page.locator(s.selector).first();
       await loc.scrollIntoViewIfNeeded({ timeout: 3000 });
       await loc.screenshot({ path: pathFor(s), timeout: 5000 });
+      if (review) writeReviewPng(pathFor(s), reviewPathFor(pathFor(s)));
     } catch {
       failed.push(s.name);
     }

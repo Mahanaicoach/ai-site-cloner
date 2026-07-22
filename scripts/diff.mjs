@@ -41,6 +41,8 @@ import {
   autoScroll,
   freezePage,
   shootSectionsFromFullPage,
+  writeReviewPng,
+  reviewPathFor,
   slugify,
   parseArgs,
   toList,
@@ -117,6 +119,7 @@ async function shootSectionsOnce(url, viewport, sections, pathFor) {
     await freezePage(page);
     const { failed } = await shootSectionsFromFullPage(page, sections, {
       pathFor: (s) => pathFor(s.name),
+      review: false, // QA captures feed pixelmatch, not eyes
     });
     for (const { name } of sections) captured[name] = !failed.includes(name);
     for (const name of failed) console.error(`  ! section shot failed: ${name} @ ${viewport.width}px`);
@@ -331,7 +334,13 @@ for (const [scope, vp, r] of flat) {
     r.originalHeight !== r.cloneHeight
       ? ` · HEIGHT MISMATCH: original ${r.originalHeight}px vs clone ${r.cloneHeight}px (compared top ${r.height}px)`
       : "";
-  console.error(`[${scope} ${vp}] Match: ${r.match.toFixed(2)}% · worst band: ${worst.band} (y ${worst.yRange}) at ${worst.match}%${heightNote}`);
+  // Failing diffs get a 640px review copy — that's the image an agent opens to
+  // inspect the failing band; the full-res artifact stays for pixel work.
+  let reviewNote = "";
+  if (r.match < 95 && r.diffImage && writeReviewPng(r.diffImage, reviewPathFor(r.diffImage))) {
+    reviewNote = ` · review: ${reviewPathFor(r.diffImage)}`;
+  }
+  console.error(`[${scope} ${vp}] Match: ${r.match.toFixed(2)}% · worst band: ${worst.band} (y ${worst.yRange}) at ${worst.match}%${heightNote}${reviewNote}`);
 }
 
 if (args.threshold) {
