@@ -1,6 +1,6 @@
 {
   "name": "ai-site-cloner",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "Clone any website into a pixel-accurate Next.js codebase with AI — scripted Playwright extraction (no eyeballing), spec-gated parallel builder agents, and scored pixel-diff QA at phone/tablet/desktop",
   "author": "Mahanaicoach",
