@@ -160,6 +160,21 @@ Platform migration of sites you own · recovering lost source code · learning h
 
 **Not for** phishing, impersonation, or passing off someone else's design as your own. Check a site's terms before cloning it. The example clones in this repo (plausible.io, uploadthing.com) are technical demonstrations — don't republish anyone's brand.
 
+## Updating
+
+In a fork or a clone of this repo, pull the latest version with:
+
+```bash
+bash scripts/update.sh
+```
+
+It keeps your own commits and runs `npm install` when dependencies change.
+Forked it on GitHub? Run `git push` afterwards, or click **Sync fork** on your fork's
+page.
+
+Made your repo with **Use this template**? It shares no history with this one, so git can't merge
+updates into it. Read the [CHANGELOG](CHANGELOG.md) and copy over the files you want.
+
 ## License
 
 MIT

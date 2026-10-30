@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-10-30
+
+### Added
+
+- `scripts/update.sh` — pulls the latest version into a fork or clone, keeps your own commits, and runs `npm install` when dependencies change. Template copies get a clear message instead of a broken merge
+
 ## [0.3.0] - 2026-07-22
 
 Renamed **site-cloner → ai-site-cloner**. Efficiency overhaul driven by measurements from a full plausible.io benchmark run (now in `examples/plausible/`): ~50% less agent-facing artifact surface and a QA phase that costs a handful of page loads on a good clone.
@@ -72,6 +78,7 @@ Renamed **site-cloner → ai-site-cloner**. Efficiency overhaul driven by measur
 - Uploadthing example clone in `examples/`
 - MIT license
 
+[0.3.1]: https://github.com/Mahanaicoach/ai-site-cloner/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Mahanaicoach/ai-site-cloner/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Mahanaicoach/ai-site-cloner/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Mahanaicoach/ai-site-cloner/releases/tag/v0.1.0
